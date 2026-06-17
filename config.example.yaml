@@ -1,0 +1,17 @@
+# Copy to config.yaml (gitignored) and fill in. Do NOT commit real tokens.
+
+sisense:
+  base_url: "https://your-trial.sisense.com"
+  token: "PASTE_SISENSE_BEARER_TOKEN"      # or use SisenseClient.login() with user/pass
+  datamodel_id: "PASTE_DATAMODEL_OID"      # from GET /api/v2/datamodels/schema
+
+thoughtspot:
+  base_url: "https://your-trial.thoughtspot.cloud"
+  token: "PASTE_THOUGHTSPOT_BEARER_TOKEN"
+
+# The ThoughtSpot Connection (to Snowflake) that the generated Table TML binds to.
+# Create this Connection in the trial first; the data must already be loaded here.
+snowflake:
+  connection_name: "Sisense Migration - Snowflake"
+  database: "SISENSE_DEMO"
+  schema: "PUBLIC"

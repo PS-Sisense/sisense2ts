@@ -1,0 +1,59 @@
+{
+  "oid": "5f198c9ebf342a002d120e60",
+  "title": "Revenue Overview",
+  "datasource": { "title": "Sample ECommerce", "fullname": "LocalHost/Sample ECommerce" },
+  "filters": [
+    { "jaql": { "dim": "[Orders.Order Date]", "level": "years", "filter": { "last": { "count": 2 } } } }
+  ],
+  "widgets": [
+    {
+      "oid": "5f198c9ebf342a002d120e62",
+      "type": "chart/column",
+      "subtype": "column/classic",
+      "title": "Revenue by Country",
+      "datasource": { "title": "Sample ECommerce" },
+      "metadata": {
+        "panels": [
+          { "name": "categories", "items": [
+            { "jaql": { "dim": "[Customers.Country]", "datatype": "text", "title": "Country" } }
+          ] },
+          { "name": "values", "items": [
+            { "jaql": { "dim": "[Orders.Revenue]", "agg": "sum", "title": "Total Revenue" },
+              "format": { "mask": { "type": "number", "decimals": 0 } } }
+          ] },
+          { "name": "break by", "items": [] },
+          { "name": "filters", "items": [] }
+        ]
+      }
+    },
+    {
+      "oid": "5f198c9ebf342a002d120e63",
+      "type": "indicator",
+      "subtype": "indicator/numeric",
+      "title": "Avg Order Value",
+      "metadata": {
+        "panels": [
+          { "name": "values", "items": [
+            { "jaql": { "formula": "sum([rev]) / count([ord])",
+                        "context": {
+                          "[rev]": { "dim": "[Orders.Revenue]", "agg": "sum" },
+                          "[ord]": { "dim": "[Orders.Order ID]", "agg": "count" }
+                        },
+                        "title": "Avg Order Value" } }
+          ] }
+        ]
+      }
+    }
+  ],
+  "layout": {
+    "type": "columnar",
+    "columns": [
+      { "index": 0, "width": 100, "cells": [
+        { "subcells": [
+          { "index": 0, "width": 70, "elements": [ { "widgetid": "5f198c9ebf342a002d120e62", "height": 384 } ] },
+          { "index": 1, "width": 30, "elements": [ { "widgetid": "5f198c9ebf342a002d120e63", "height": 384 } ] }
+        ] }
+      ] }
+    ]
+  }
+}

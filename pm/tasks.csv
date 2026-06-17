@@ -1,0 +1,24 @@
+Task,Workstream,Owner,Depends On,Milestone,Estimate (days),Status,Description
+Freeze IR contract (ir/models.py),Setup,Lead,,Day 1,0.5,To Do,Sign off the frozen IR; blocks B/C/D finalization
+Provision access (Sisense token+datamodel_id; Snowflake admin; TS admin),Setup,Lead,,Day 1,0.5,To Do,All creds into config.yaml (gitignored)
+Create git remote + push scaffold + add collaborators,Setup,Lead,,Day 1,0.25,To Do,GitHub repo; add the 3 devs
+Local setup: clone venv install pytest green,Setup,All,,Day 1,0.25,To Do,pip install -e ".[dev]" then pytest
+A1 Sisense auth + pull one dashboard + datamodel,Extract,Dev A,S2,Day 2,1,To Do,Verify REST endpoints against trial
+A2 Save real trial exports into tests/fixtures,Extract,Dev A,A1,Day 2,0.5,To Do,Replace synthetic fixtures with real ones
+A3 Implement parse_datamodel,Extract,Dev A,A2,Day 3,1,To Do,raw -> SourceModel
+A4 Implement parse_dashboard + classify_filter,Extract,Dev A,A2,Day 4,1.5,To Do,raw -> SourceDashboard
+A5 Load Sisense data into Snowflake + create TS Connection,Infra,Dev A,S2,Day 2,1,To Do,RISK #1 - do early
+A6 Implement TS import client + import trivial TML,Load,Dev A,A5,Day 3,1,To Do,importMetadataTML
+A7 Wire end-to-end import in cli.py (M2 dry-run),Load,Dev A,B4;C2,Day 5,1,To Do,with Dev C
+B1 Implement translate_formula (supported subset),Calc,Dev B,S1,Day 3,2,To Do,LONG POLE; flag UNSUPPORTED as MANUAL
+B2 Implement filter translation,Calc,Dev B,S1,Day 4,1,To Do,member/range/relative/top-N/exclude
+B3 model_to_tml Table TML,Model,Dev B,S1,Day 3,1,To Do,types + connection binding
+B4 model_to_tml Model TML,Model,Dev B,B3,Day 4,1.5,To Do,model_tables joins cardinality column_ids
+B5 Calculated columns -> formulas,Model,Dev B,B1;B4,Day 5,1,To Do,uses translate_formula + coverage
+B6 Unit tests + remove xfail,Calc,Dev B,B1,Day 5,0.5,To Do,test_formula/test_model
+C1 dashboard_to_tml widget -> Answer,Content,Dev C,S1,Day 4,1.5,To Do,CHART_TYPE_MAP + fields + measures
+C2 dashboard_to_tml Liveboard TML,Content,Dev C,C1,Day 4,1,To Do,visualizations + layout.tiles
+C3 Coverage report wiring + polish,Report,Dev C,C1,Day 5,0.5,To Do,CoverageItems from all stages
+C4 CLI end-to-end wiring + dry-run UX,Load,Dev C,A6;B4;C2,Day 5,1,To Do,write TML + report to out/
+C5 QA end-to-end on real dashboard,QA,Dev C,C4,Day 6,1,To Do,fix import errors via VALIDATE_ONLY
+C6 Demo script + known-limitations sheet,Demo,Dev C,M2,Day 7,0.5,To Do,for the Friday demo

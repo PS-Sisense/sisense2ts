@@ -1,0 +1,85 @@
+{
+  "oid": "5f198c9ebf342a002d120eff",
+  "title": "ECommerce Executive Overview",
+  "datasource": { "title": "Sample ECommerce", "fullname": "LocalHost/Sample ECommerce" },
+  "filters": [
+    { "jaql": { "dim": "[Orders.Order Date]", "level": "years", "filter": { "last": { "count": 2 } } } },
+    { "jaql": { "dim": "[Customers.Country]", "filter": { "members": ["United States", "United Kingdom", "Canada"] } } }
+  ],
+  "widgets": [
+    {
+      "oid": "w_col_revbycountry", "type": "chart/column", "subtype": "column/classic",
+      "title": "Revenue by Country",
+      "metadata": { "panels": [
+        { "name": "categories", "items": [ { "jaql": { "dim": "[Customers.Country]", "datatype": "text", "title": "Country" } } ] },
+        { "name": "values", "items": [ { "jaql": { "dim": "[Orders.Revenue]", "agg": "sum", "title": "Total Revenue" } } ] }
+      ] }
+    },
+    {
+      "oid": "w_line_trend", "type": "chart/line", "subtype": "line/spline",
+      "title": "Revenue Trend",
+      "metadata": { "panels": [
+        { "name": "categories", "items": [ { "jaql": { "dim": "[Orders.Order Date]", "level": "months", "title": "Month" } } ] },
+        { "name": "values", "items": [ { "jaql": { "dim": "[Orders.Revenue]", "agg": "sum", "title": "Revenue" } } ] }
+      ] }
+    },
+    {
+      "oid": "w_pie_category", "type": "chart/pie", "subtype": "pie/donut",
+      "title": "Orders by Category",
+      "metadata": { "panels": [
+        { "name": "categories", "items": [ { "jaql": { "dim": "[Products.Category]", "datatype": "text", "title": "Category" } } ] },
+        { "name": "values", "items": [ { "jaql": { "dim": "[Orders.Order ID]", "agg": "count", "title": "Orders" } } ] }
+      ] }
+    },
+    {
+      "oid": "w_ind_aov", "type": "indicator", "subtype": "indicator/numeric",
+      "title": "Avg Order Value",
+      "metadata": { "panels": [
+        { "name": "values", "items": [ { "jaql": {
+          "formula": "sum([rev]) / count([ord])",
+          "context": {
+            "[rev]": { "dim": "[Orders.Revenue]", "agg": "sum" },
+            "[ord]": { "dim": "[Orders.Order ID]", "agg": "count" }
+          }, "title": "Avg Order Value" } } ] }
+      ] }
+    },
+    {
+      "oid": "w_ind_yoy", "type": "indicator", "subtype": "indicator/numeric",
+      "title": "YoY Revenue Growth",
+      "metadata": { "panels": [
+        { "name": "values", "items": [ { "jaql": {
+          "formula": "growth(sum([rev2]))",
+          "context": { "[rev2]": { "dim": "[Orders.Revenue]", "agg": "sum" } },
+          "title": "YoY Revenue Growth" } } ] }
+      ] }
+    },
+    {
+      "oid": "w_table_topcust", "type": "tablewidget", "subtype": "",
+      "title": "Top Customers",
+      "metadata": { "panels": [
+        { "name": "columns", "items": [
+          { "jaql": { "dim": "[Customers.Full Name]", "datatype": "text", "title": "Customer",
+                      "filter": { "top": 10, "by": { "dim": "[Orders.Revenue]", "agg": "sum" } } } },
+          { "jaql": { "dim": "[Orders.Revenue]", "agg": "sum", "title": "Revenue",
+                      "filter": { "from": 100 } } }
+        ] }
+      ] }
+    }
+  ],
+  "layout": { "type": "columnar", "columns": [
+    { "index": 0, "width": 100, "cells": [
+      { "subcells": [
+        { "index": 0, "width": 50, "elements": [ { "widgetid": "w_col_revbycountry", "height": 320 } ] },
+        { "index": 1, "width": 50, "elements": [ { "widgetid": "w_line_trend", "height": 320 } ] }
+      ] },
+      { "subcells": [
+        { "index": 0, "width": 34, "elements": [ { "widgetid": "w_pie_category", "height": 280 } ] },
+        { "index": 1, "width": 33, "elements": [ { "widgetid": "w_ind_aov", "height": 280 } ] },
+        { "index": 2, "width": 33, "elements": [ { "widgetid": "w_ind_yoy", "height": 280 } ] }
+      ] },
+      { "subcells": [
+        { "index": 0, "width": 100, "elements": [ { "widgetid": "w_table_topcust", "height": 360 } ] }
+      ] }
+    ] }
+  ] }
+}

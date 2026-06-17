@@ -1,0 +1,22 @@
+"""IR package. Import everything from here, e.g. `from sisense2ts.ir import SourceModel`."""
+from sisense2ts.ir.models import (  # noqa: F401
+    Coverage,
+    CoverageItem,
+    CoverageReport,
+    ColumnRole,
+    DataType,
+    Field,
+    FieldKind,
+    FilterKind,
+    Formula,
+    JoinEndpoint,
+    Relation,
+    SourceColumn,
+    SourceDashboard,
+    SourceFilter,
+    SourceModel,
+    SourceTable,
+    SourceWidget,
+    TilePosition,
+    TranslationResult,
+)

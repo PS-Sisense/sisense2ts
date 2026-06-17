@@ -1,0 +1,23 @@
+[project]
+name = "sisense2ts"
+version = "0.0.1"
+description = "Convert Sisense BI assets into ThoughtSpot TML"
+requires-python = ">=3.10"
+dependencies = [
+    "thoughtspot-tml>=2.0",
+    "requests>=2.31",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+sisense2ts = "sisense2ts.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

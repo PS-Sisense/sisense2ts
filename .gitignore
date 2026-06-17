@@ -1,0 +1,19 @@
+# secrets -- never commit trial creds / tokens
+config.yaml
+config.*.yaml
+!config.example.yaml
+.env
+*.token
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# generated output
+out/
+*.tml
