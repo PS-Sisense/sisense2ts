@@ -5,8 +5,8 @@ Create git remote + push scaffold + add collaborators,Setup,Lead,,Day 1,0.25,To 
 Local setup: clone venv install pytest green,Setup,All,,Day 1,0.25,To Do,pip install -e ".[dev]" then pytest
 A1 Sisense auth + pull one dashboard + datamodel,Extract,Dev A,S2,Day 2,1,To Do,Verify REST endpoints against trial
 A2 Save real trial exports into tests/fixtures,Extract,Dev A,A1,Day 2,0.5,To Do,Replace synthetic fixtures with real ones
-A3 Implement parse_datamodel,Extract,Dev A,A2,Day 3,1,To Do,raw -> SourceModel
-A4 Implement parse_dashboard + classify_filter,Extract,Dev A,A2,Day 4,1.5,To Do,raw -> SourceDashboard
+A3 Implement parse_datamodel,Extract,Dev A,S1,Day 3,1,To Do,raw -> SourceModel; build on fixtures, validate on real exports after A2
+A4 Implement parse_dashboard + classify_filter,Extract,Dev A,S1,Day 4,1.5,To Do,raw -> SourceDashboard; build on fixtures, validate after A2
 A5 Load Sisense data into Snowflake + create TS Connection,Infra,Dev A,S2,Day 2,1,To Do,RISK #1 - do early
 A6 Implement TS import client + import trivial TML,Load,Dev A,A5,Day 3,1,To Do,importMetadataTML
 A7 Wire end-to-end import in cli.py (M2 dry-run),Load,Dev A,B4;C2,Day 5,1,To Do,with Dev C

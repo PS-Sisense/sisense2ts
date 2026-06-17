@@ -8,14 +8,32 @@ deferred past the demo.
 
 | Owner | Lane | Workstreams | Files |
 |---|---|---|---|
-| **Dev A** | Pipes & Data | A (extract) + E-import + Snowflake/TS infra | `extract/*`, `load/ts_client.py` |
+| **Dev A = you** | Pipes & Data + coordinate | A (extract) + load-import + Snowflake/TS infra; plus IR sign-off, access/creds, demo. You are Snowflake + GitHub admin, so the infra critical path never waits on permissions. | `extract/*`, `load/ts_client.py`, freeze `ir/models.py` |
 | **Dev B** | Semantic (long pole) | C (calc/filter) + B (model TML) | `map/formula.py`, `map/model.py` |
-| **Dev C** | Content & Delivery | D (content) + E-CLI/report + QA + demo | `map/content.py`, `cli.py`, `report/*`, `tests/*` |
-| **Lead (you)** | Coordinate | IR sign-off, access/creds, demo narration | `ir/models.py` (freeze) |
+| **Dev C** | Content & Delivery + relief valve | D (content) + CLI/report + QA + demo; absorbs overflow (e.g. take A4 parse_dashboard if A's infra runs long) | `map/content.py`, `cli.py`, `report/*`, `tests/*` |
 
-Dev B owns the critical path (formula translation is the long pole and B's model
-formulas depend on it), so start B1 first and hardest. Dev A is critical-path early
-(real fixtures + the Snowflake data layer = risk #1). Dev C integrates late.
+Dev B owns the algorithmic long pole (formula translation; B's model formulas depend on
+it), so start B1 first and hardest. Dev A owns the infra critical path (Snowflake + TS
+Connection = risk #1) and is the relief target's source of overflow. Dev C integrates late
+and is the relief valve.
+
+## Parallelism (is this actually parallel?)
+
+Yes. Most "Depends On" entries in tasks.csv are WITHIN one person's queue (A1 -> A2 -> A3),
+which is just that person's order of work, not a cross-person block. Real cross-person
+blocking is tiny:
+
+- **One sync point up front (Day 1):** freeze the IR (S1) + provision access (S2) + start
+  the Snowflake load (A5). After that, all three lanes run independently for days against
+  the fixtures in `tests/fixtures/`.
+- **One convergence at the end (Day 4-5):** the CLI (C4/A7) wires together the import
+  client (A6), the Model TML (B4), and the Liveboard (C2). That is integration, by design.
+- **Soft handoff:** C needs B1 (translate_formula) for measures. C builds dimensions +
+  chart types first and drops B1 in when it lands (~Day 2). Not a hard block.
+
+The only true critical path is **A5 (Snowflake load + ThoughtSpot Connection)**. It gates
+M1 and infra always slips, so Dev A does it Day 1 before touching code. Days 2-4 are three
+independent lanes.
 
 ## Milestones
 
