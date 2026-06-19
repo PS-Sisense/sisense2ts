@@ -100,7 +100,7 @@ to avoid double-maintenance:
   ClickUp: make a List, Import > CSV, map the columns. Then view it as a Board grouped by
   Assignee plus a Calendar/Timeline against the 2026-06-26 deadline.
 - **GitHub Issues (code-linked, already created):** 21 issues + the `Demo 2026-06-26`
-  milestone + `ws:*` labels live at github.com/anujseth2/sisense2ts/issues (created via
+  milestone + `ws:*` labels live at github.com/PS-Sisense/sisense2ts/issues (created via
   [`pm/create_github_issues.sh`](pm/create_github_issues.sh)). Use these instead if you want
   tasks tied to commits and PRs. `pm/tasks.csv` is the generic-importer version.
 

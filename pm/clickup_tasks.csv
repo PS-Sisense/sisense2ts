@@ -1,7 +1,7 @@
 Task Name,Status,Assignee,Priority,Due Date,Workstream,Estimate (days),Depends On,Description
 S1 - Freeze the IR contract (ir/models.py),To Do,Anuj Seth,Urgent,2026-06-18,setup,0.5,,"Draft exists in the repo; review and sign off so B and C build against a locked interface. Blocks finalization of all map work."
 S2 - Provision access (Sisense / Snowflake / ThoughtSpot),To Do,Anuj Seth,High,2026-06-18,setup,0.5,,"Sisense trial token + datamodel_id, Snowflake admin, ThoughtSpot trial admin. Creds go in config.yaml (gitignored)."
-S3 - Create git remote + add collaborators,Complete,Anuj Seth,Normal,2026-06-18,setup,0.25,,"Repo live at github.com/anujseth2/sisense2ts; scaffold pushed; collaborators invited."
+S3 - Create git remote + add collaborators,Complete,Anuj Seth,Normal,2026-06-18,setup,0.25,,"Repo live at github.com/PS-Sisense/sisense2ts; scaffold pushed; collaborators invited."
 S4 - Local setup (clone / venv / install / tests green),To Do,Anuj Seth,Normal,2026-06-18,setup,0.25,S3,"Each dev: clone, python -m venv, pip install -e '.[dev]', pytest (expect 9 passed, 1 xfail)."
 A1 - Sisense auth + pull one dashboard + datamodel,To Do,Anuj Seth,High,2026-06-19,ws:extract,1,S2,"Verify REST endpoints against the trial: auth, list dashboards, export dashboard + datamodel schema."
 A2 - Save real trial exports into tests/fixtures,To Do,Anuj Seth,Normal,2026-06-19,ws:extract,0.5,A1,"Replace synthetic fixtures with real trial exports so the same code runs on real data."
