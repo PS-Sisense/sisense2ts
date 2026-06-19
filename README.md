@@ -92,14 +92,17 @@ data movement; pixel-perfect layout; programmatic/runtime dashboard composition.
 
 ## Project management
 
-Tasks for the 3-person sprint live in [`pm/PLAN.md`](pm/PLAN.md). To load them into a tool:
+Tasks for the 3-person sprint are in [`pm/PLAN.md`](pm/PLAN.md). Pick ONE source of truth
+to avoid double-maintenance:
 
-- **Recommended: GitHub Issues + Projects** (free, lives with the repo, links commits/PRs
-  to tasks, no second tool). After pushing the repo, set `DEV_A/DEV_B/DEV_C/LEAD` to
-  GitHub usernames and run [`pm/create_github_issues.sh`](pm/create_github_issues.sh),
-  then make a Project board.
-- **Alternative: ClickUp / Trello / any tool** that imports CSV: import
-  [`pm/tasks.csv`](pm/tasks.csv) and map the columns on import.
+- **ClickUp (the visual board we use):** import [`pm/clickup_tasks.csv`](pm/clickup_tasks.csv).
+  It has real due dates, owners, priorities, and a Workstream field to group/color by. In
+  ClickUp: make a List, Import > CSV, map the columns. Then view it as a Board grouped by
+  Assignee plus a Calendar/Timeline against the 2026-06-26 deadline.
+- **GitHub Issues (code-linked, already created):** 21 issues + the `Demo 2026-06-26`
+  milestone + `ws:*` labels live at github.com/anujseth2/sisense2ts/issues (created via
+  [`pm/create_github_issues.sh`](pm/create_github_issues.sh)). Use these instead if you want
+  tasks tied to commits and PRs. `pm/tasks.csv` is the generic-importer version.
 
 ## Sample assets
 
