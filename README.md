@@ -4,6 +4,8 @@ Convert Sisense BI assets (data model + dashboards) into ThoughtSpot TML, import
 into a ThoughtSpot instance, and report what converted automatically versus what needs
 a human. Built to accelerate Sisense to ThoughtSpot migrations in Professional Services.
 
+**Project docs:** [Plan & tasks](pm/PLAN.md) · [Architecture](ARCHITECTURE.md) · [Contributing & workflow](CONTRIBUTING.md)
+
 ## The target (demo, Friday June 26)
 
 > Run one command against a dashboard in the Sisense trial. The tool extracts the data
