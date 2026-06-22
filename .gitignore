@@ -17,3 +17,6 @@ venv/
 # generated output
 out/
 *.tml
+
+# real Sisense exports - local only; contain encrypted connection params, never commit
+tests/fixtures/real_*.json
