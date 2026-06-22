@@ -42,6 +42,8 @@ what lets us add Power BI / Tableau later by writing a new `extract/` only.
 
 **Rule: do not change the IR shapes without lead sign-off.** Everyone codes against them.
 
+Full architecture (diagrams, object mapping, the data-layer model): see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Who owns what (4 contributors)
 
 | Owner | Workstream | Files | Starts on |
