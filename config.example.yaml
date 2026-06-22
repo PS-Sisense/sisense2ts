@@ -9,9 +9,10 @@ thoughtspot:
   base_url: "https://your-trial.thoughtspot.cloud"
   token: "PASTE_THOUGHTSPOT_BEARER_TOKEN"
 
-# The ThoughtSpot Connection (to Snowflake) that the generated Table TML binds to.
+# The ThoughtSpot Connection (to Databricks) that the generated Table TML binds to.
 # Create this Connection in the trial first; the data must already be loaded here.
-snowflake:
-  connection_name: "Sisense Migration - Snowflake"
-  database: "SISENSE_DEMO"
-  schema: "PUBLIC"
+# See sql/databricks_sample_ecommerce.sql to stand up the tables.
+databricks:
+  connection_name: "Sisense Migration - Databricks"
+  catalog: "main"
+  schema: "sisense_demo"

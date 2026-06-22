@@ -38,9 +38,9 @@ def run(config: dict, dashboard_oid: str, out_dir: Path, dry_run: bool = False) 
     ir_dash = parse.parse_dashboard(raw_dash)
 
     # 2. MAP (WS-B / WS-C / WS-D)
-    sf = config["snowflake"]
+    dbx = config["databricks"]
     model_tml = map_model.model_to_tml(
-        ir_model, sf["connection_name"], sf["database"], sf["schema"], report
+        ir_model, dbx["connection_name"], dbx["catalog"], dbx["schema"], report
     )
     content_tml = map_content.dashboard_to_tml(ir_dash, ir_model.name, report)
 

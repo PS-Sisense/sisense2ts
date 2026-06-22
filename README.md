@@ -46,11 +46,11 @@ what lets us add Power BI / Tableau later by writing a new `extract/` only.
 
 | Owner | Workstream | Files | Starts on |
 |---|---|---|---|
-| **P1** (pipes) | **A. Extract** then **E. Load/CLI** | `extract/sisense_client.py`, `extract/parse.py`, `load/ts_client.py`, `cli.py` | Sisense REST spike + Snowflake/TS setup |
+| **P1** (pipes) | **A. Extract** then **E. Load/CLI** | `extract/sisense_client.py`, `extract/parse.py`, `load/ts_client.py`, `cli.py` | Sisense REST spike + Databricks/TS setup |
 | **P2** | **B. Data model** | `map/model.py` | Table + Model TML from fixtures |
 | **P3** (strongest) | **C. Calc + filter** | `map/formula.py` | `translate_formula` from fixtures (isolated, test-first) |
 | **P4** | **D. Content** | `map/content.py` | widget -> Answer, dashboard -> Liveboard |
-| **Lead** | IR freeze, unblock, Snowflake/TS access, demo | - | sign off `ir/models.py` |
+| **Lead** | IR freeze, unblock, Databricks/TS access, demo | - | sign off `ir/models.py` |
 
 P3 (calc translation) is the long pole and is pure and isolated, so start it now and
 hardest. P1 is critical-path early (real fixtures) and integrates everyone late.
@@ -59,9 +59,9 @@ hardest. P1 is critical-path early (real fixtures) and integrates everyone late.
 
 | Day | Milestone |
 |---|---|
-| Wed 6/17 | Scaffold + **IR frozen** + owners assigned + Snowflake/TS connection task kicked off |
+| Wed 6/17 | Scaffold + **IR frozen** + owners assigned + Databricks/TS connection task kicked off |
 | Thu 6/18 | Spike done: auth to trial, one real dashboard + datamodel pulled into `tests/fixtures/`, trivial TML import confirmed |
-| Fri 6/19 | **M1: model lands** -- data model imported into TS, queryable against Snowflake |
+| Fri 6/19 | **M1: model lands** -- data model imported into TS, queryable against Databricks |
 | Mon 6/22 | Simple measures + filters translated; first generated Liveboard |
 | Tue 6/23 | **M2: one dashboard end-to-end** rendering in TS + coverage report v1 |
 | Wed 6/24 | Broaden to 2-3 dashboards; harden chart-type map; CLI polish |
@@ -70,11 +70,11 @@ hardest. P1 is critical-path early (real fixtures) and integrates everyone late.
 
 ## Day-1 checklist
 
-- **Lead:** review and freeze `ir/models.py`. Confirm Snowflake account + ThoughtSpot
+- **Lead:** review and freeze `ir/models.py`. Confirm Databricks account + ThoughtSpot
   trial admin access. Decide the demo dashboard(s).
 - **P1:** authenticate to the Sisense trial; pull one dashboard (`get_dashboard`) and the
   datamodel (`export_datamodel`); save both into `tests/fixtures/` (overwrite samples).
-  Load that dashboard's data into Snowflake and create the ThoughtSpot Connection.
+  Load that dashboard's data into Databricks and create the ThoughtSpot Connection.
   Confirm a hand-written trivial TML imports via `load/ts_client.py`.
 - **P2/P3/P4:** build against the fixtures immediately. Do not wait for live extraction.
 
@@ -117,7 +117,7 @@ to avoid double-maintenance:
 
 - **Target Model TML, not Worksheet TML.** Worksheets are deprecated and their import is
   blocked on current ThoughtSpot versions.
-- **The data must live in Snowflake** and be reachable by a ThoughtSpot Connection before
+- **The data must live in Databricks** and be reachable by a ThoughtSpot Connection before
   an import will render. This is risk #1; P1 + lead own it on Day 1.
 - **Never commit tokens.** `config.yaml` and `*.token` are gitignored.
 - Generate TML with the `thoughtspot_tml` library; do not hand-write YAML.
