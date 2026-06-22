@@ -1,9 +1,10 @@
 """Frozen intermediate representation (IR) for the Sisense -> ThoughtSpot converter.
 
-THIS IS THE TEAM CONTRACT.
-Do not change these shapes without sign-off from the lead. Every workstream codes
-against these types in parallel, using fixtures, so a silent change here breaks
-other people's work.
+THIS IS THE TEAM CONTRACT.  Status: FROZEN 2026-06-18 (task S1, signed off by lead).
+Change it only via the amendment process in CONTRIBUTING.md ("Evolving the IR"): reach for
+the `raw` escape hatch first, add new fields additively (with defaults), and make any
+breaking change in one coordinated commit that updates every consumer with tests green.
+Every workstream codes against these types in parallel, so a silent change breaks others.
 
 Two halves:
   * Semantic layer  -> SourceModel / SourceTable / SourceColumn / Relation
@@ -70,6 +71,7 @@ class SourceColumn:
     id: str
     name: str
     data_type: DataType = DataType.UNKNOWN
+    role: Optional[ColumnRole] = None  # MEASURE/ATTRIBUTE; None -> WS-B infers (numeric->MEASURE/SUM, else ATTRIBUTE)
     is_calculated: bool = False
     expression: Optional[str] = None   # raw Sisense SQL expr for calculated columns
     raw: dict = field(default_factory=dict)
