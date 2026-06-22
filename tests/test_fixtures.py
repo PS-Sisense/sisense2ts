@@ -3,7 +3,7 @@ P1 replaces these with REAL trial exports once live extraction works (same filen
 
 
 def test_datamodel_shape(raw_datamodel):
-    tables = raw_datamodel["datasets"][0]["tables"]
+    tables = raw_datamodel["datasets"][0]["schema"]["tables"]
     names = {t["name"] for t in tables}
     assert {"Customers", "Orders"} <= names
     assert raw_datamodel["relations"], "expected at least one relation/join"

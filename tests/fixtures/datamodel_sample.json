@@ -1,43 +1,46 @@
 {
+  "oid": "model-ecom-sample",
   "title": "Sample ECommerce",
-  "oid": "11111111-1111-1111-1111-111111111111",
   "type": "extract",
-  "datasets": [
+  "relations": [
     {
-      "name": "ECommerce CSVs",
-      "type": "extract",
-      "connection": { "provider": "CSV", "schema": "/opt/sisense/storage" },
-      "tables": [
-        {
-          "id": "t_customers",
-          "name": "Customers",
-          "columns": [
-            { "id": "c_cust_id", "name": "Customer ID", "type": 8, "indexed": true },
-            { "id": "c_first", "name": "First Name", "type": 18, "indexed": true },
-            { "id": "c_country", "name": "Country", "type": 18, "indexed": true },
-            { "id": "c_full", "name": "Full Name", "type": 18, "isCustom": true,
-              "expression": "select [First Name] + ' ' + [Last Name]" }
-          ]
-        },
-        {
-          "id": "t_orders",
-          "name": "Orders",
-          "columns": [
-            { "id": "o_order_id", "name": "Order ID", "type": 8 },
-            { "id": "o_cust_id", "name": "Customer ID", "type": 8 },
-            { "id": "o_revenue", "name": "Revenue", "type": 5 },
-            { "id": "o_date", "name": "Order Date", "type": 31 }
-          ]
-        }
+      "oid": "rel-1",
+      "type": null,
+      "columns": [
+        { "dataset": "ds-1", "table": "tbl-orders", "column": "col-o-custid" },
+        { "dataset": "ds-1", "table": "tbl-customers", "column": "col-c-custid" }
       ]
     }
   ],
-  "relations": [
+  "datasets": [
     {
-      "columns": [
-        { "dataset": "ECommerce CSVs", "table": "t_orders", "column": "o_cust_id" },
-        { "dataset": "ECommerce CSVs", "table": "t_customers", "column": "c_cust_id" }
-      ]
+      "oid": "ds-1",
+      "name": "ECommerce CSVs",
+      "type": "extract",
+      "connection": { "provider": "CSV" },
+      "schema": {
+        "tables": [
+          {
+            "oid": "tbl-customers", "id": "Customers", "name": "Customers",
+            "columns": [
+              { "oid": "col-c-custid", "id": "Customer ID", "name": "Customer ID", "type": 8, "indexed": true },
+              { "oid": "col-c-first", "id": "First Name", "name": "First Name", "type": 18 },
+              { "oid": "col-c-country", "id": "Country", "name": "Country", "type": 18 },
+              { "oid": "col-c-full", "id": "Full Name", "name": "Full Name", "type": 18,
+                "isCustom": true, "expression": "[First Name] + ' ' + [Last Name]" }
+            ]
+          },
+          {
+            "oid": "tbl-orders", "id": "Orders", "name": "Orders",
+            "columns": [
+              { "oid": "col-o-orderid", "id": "Order ID", "name": "Order ID", "type": 8 },
+              { "oid": "col-o-custid", "id": "Customer ID", "name": "Customer ID", "type": 8 },
+              { "oid": "col-o-rev", "id": "Revenue", "name": "Revenue", "type": 5 },
+              { "oid": "col-o-date", "id": "Order Date", "name": "Order Date", "type": 31 }
+            ]
+          }
+        ]
+      }
     }
   ]
 }
