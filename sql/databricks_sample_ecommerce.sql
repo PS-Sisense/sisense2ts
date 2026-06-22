@@ -1,30 +1,34 @@
 -- Sample ECommerce data layer for the Sisense -> ThoughtSpot demo (Databricks).
 -- Schema mirrors the live Sisense "Sample ECommerce" model extracted via A1.
--- Run in a Databricks SQL warehouse or notebook. Adjust the catalog if not using `main`.
--- Note: physical table names drop the ".csv" suffix from Sisense table ids; the converter
--- (WS-B) normalizes SourceTable.id "Country.csv" -> db_table "Country".
+-- Run via `python sql/run_sql.py` (sets catalog/schema from config.yaml; default catalog
+-- "workspace"), or paste into a SQL warehouse after `USE <catalog>.sisense_demo;`.
+--
+-- Physical-name conventions the converter (WS-B) must mirror:
+--   db_table       = Sisense table id without the ".csv" suffix   (Country.csv -> Country)
+--   db_column_name = Sisense column name with spaces -> underscores (Country ID -> Country_ID)
+-- (Databricks Delta rejects spaces in column names.)
 
-CREATE SCHEMA IF NOT EXISTS main.sisense_demo;
-USE main.sisense_demo;
+CREATE SCHEMA IF NOT EXISTS sisense_demo;
+USE sisense_demo;
 
-CREATE OR REPLACE TABLE Country (`Country` STRING, `Country ID` INT);
-INSERT INTO Country (`Country`, `Country ID`) VALUES
+CREATE OR REPLACE TABLE Country (Country STRING, Country_ID INT);
+INSERT INTO Country (Country, Country_ID) VALUES
   ('United States', 1), ('United Kingdom', 2), ('Canada', 3), ('Germany', 4), ('France', 5);
 
-CREATE OR REPLACE TABLE Brand (`Brand` STRING, `Brand ID` INT);
-INSERT INTO Brand (`Brand`, `Brand ID`) VALUES
+CREATE OR REPLACE TABLE Brand (Brand STRING, Brand_ID INT);
+INSERT INTO Brand (Brand, Brand_ID) VALUES
   ('Acme', 1), ('Globex', 2), ('Initech', 3), ('Umbrella', 4), ('Stark', 5);
 
-CREATE OR REPLACE TABLE Category (`Category` STRING, `Category ID` INT);
-INSERT INTO Category (`Category`, `Category ID`) VALUES
+CREATE OR REPLACE TABLE Category (Category STRING, Category_ID INT);
+INSERT INTO Category (Category, Category_ID) VALUES
   ('Apparel', 1), ('Electronics', 2), ('Home', 3), ('Toys', 4), ('Sports', 5);
 
 CREATE OR REPLACE TABLE Commerce (
-  `Age Range` STRING, `Cost` DECIMAL(18,2), `Brand ID` INT, `Category ID` INT,
-  `Condition` STRING, `Country ID` INT, `Date` TIMESTAMP, `Gender` STRING,
-  `Quantity` INT, `Revenue` DECIMAL(18,2), `Visit ID` INT
+  Age_Range STRING, Cost DECIMAL(18,2), Brand_ID INT, Category_ID INT,
+  `Condition` STRING, Country_ID INT, `Date` TIMESTAMP, Gender STRING,
+  Quantity INT, Revenue DECIMAL(18,2), Visit_ID INT
 );
-INSERT INTO Commerce (`Age Range`,`Cost`,`Brand ID`,`Category ID`,`Condition`,`Country ID`,`Date`,`Gender`,`Quantity`,`Revenue`,`Visit ID`) VALUES
+INSERT INTO Commerce (Age_Range,Cost,Brand_ID,Category_ID,`Condition`,Country_ID,`Date`,Gender,Quantity,Revenue,Visit_ID) VALUES
   ('18-24',  50.00, 1, 1, 'New',          1, TIMESTAMP'2024-01-10', 'Female', 3, 150.00, 1001),
   ('25-34', 120.00, 2, 2, 'New',          2, TIMESTAMP'2024-02-14', 'Male',   1, 220.00, 1002),
   ('35-44',  80.00, 3, 3, 'Used',         3, TIMESTAMP'2024-03-05', 'Female', 2, 160.00, 1003),
@@ -48,4 +52,4 @@ INSERT INTO Commerce (`Age Range`,`Cost`,`Brand ID`,`Category ID`,`Condition`,`C
 
 -- Sanity check
 SELECT 'rows' AS t, count(*) AS n FROM Commerce
-UNION ALL SELECT 'revenue', sum(`Revenue`) FROM Commerce;
+UNION ALL SELECT 'revenue', sum(Revenue) FROM Commerce;

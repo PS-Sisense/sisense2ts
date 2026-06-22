@@ -14,5 +14,5 @@ thoughtspot:
 # See sql/databricks_sample_ecommerce.sql to stand up the tables.
 databricks:
   connection_name: "Sisense Migration - Databricks"
-  catalog: "main"
+  catalog: "workspace"
   schema: "sisense_demo"

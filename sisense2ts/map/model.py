@@ -25,6 +25,10 @@ def model_to_tml(
 
     TODO(WS-B):
       - one Table TML per SourceTable, bound to `connection_name` / db / schema.
+        db_table = SourceTable.id WITHOUT the ".csv" suffix; db_column_name =
+        SourceColumn.name with spaces -> underscores (Databricks Delta rejects spaces);
+        column `name` keeps the Sisense display name. (Matches the live Databricks load,
+        sql/databricks_sample_ecommerce.sql, verified 2026-06-18.)
         Map SourceColumn.data_type -> TML db_column_properties.data_type.
         Set column_type ATTRIBUTE vs MEASURE and a default aggregation for measures.
       - one Model TML: model_tables (+ fqn handling), joins from SourceModel.relations
