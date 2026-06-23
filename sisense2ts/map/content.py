@@ -43,10 +43,14 @@ def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="C
     """Build an Answer TML dict on a Model. `columns` are display names in order;
     a model measure with aggregation appears as 'Total <col>' (e.g. 'Total Revenue').
     Mirrors the cluster's exported answer shape: both a table and a chart block."""
+    measures = [c for c in columns if c.startswith("Total ")]  # aggregated model measures
+    dims = [c for c in columns if c not in measures]
     chart = {"type": chart_type, "chart_columns": [{"column_id": c} for c in columns],
              "client_state": "", "client_state_v2": ""}
-    if chart_type in ("COLUMN", "BAR", "LINE", "AREA") and len(columns) >= 2:
-        chart["axis_configs"] = [{"x": [columns[0]], "y": columns[1:]}]
+    if chart_type in ("COLUMN", "BAR", "LINE", "AREA", "STACKED_COLUMN") and len(columns) >= 2:
+        chart["axis_configs"] = [{"x": dims, "y": measures or [columns[-1]]}]
+    elif chart_type == "KPI":  # KPI needs the measure under y, even with no dimension
+        chart["axis_configs"] = [{"y": measures or columns}]
     return {
         "name": name,
         "display_mode": "CHART_MODE",
