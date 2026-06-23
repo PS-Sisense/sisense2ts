@@ -38,15 +38,18 @@ def run(config: dict, dashboard_oid: str, out_dir: Path, dry_run: bool = False) 
     ir_dash = parse.parse_dashboard(raw_dash)
 
     # 2. MAP (WS-B / WS-C / WS-D)
+    # NOTE: scripts/land_demo.py is the proven end-to-end runner today. This CLI is the
+    # A7 target; it still needs dashboard_to_tml (content auto-mapping) to be finished.
     dbx = config["databricks"]
-    model_tml = map_model.model_to_tml(
-        ir_model, dbx["connection_name"], dbx["catalog"], dbx["schema"], report
+    model_bundle = map_model.model_to_tml(
+        ir_model, dbx["connection_name"], dbx.get("connection_fqn", ""),
+        dbx["catalog"], dbx["schema"], report=report,
     )
-    content_tml = map_content.dashboard_to_tml(ir_dash, ir_model.name, report)
+    content_tml = map_content.dashboard_to_tml(ir_dash, ir_model.name, report)  # TODO(C1/C2): WIP
 
     # 3. LOAD (WS-E)
-    tmls = [*model_tml["tables"], model_tml["model"], *content_tml["answers"], content_tml["liveboard"]]
-    tmls = [t if isinstance(t, str) else str(t) for t in tmls]  # TODO(WS-E): dump via thoughtspot_tml
+    tmls = [yaml.safe_dump(t, sort_keys=False) for t in (*model_bundle["tables"], model_bundle["model"])]
+    tmls += [yaml.safe_dump(t, sort_keys=False) for t in (*content_tml["answers"], content_tml["liveboard"])]
     ts = ThoughtSpotClient(config["thoughtspot"]["base_url"], config["thoughtspot"]["token"])
     result = ts.validate_tml(tmls) if dry_run else ts.import_tml(tmls)
     print("Import result:", result)

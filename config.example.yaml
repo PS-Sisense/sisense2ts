@@ -14,5 +14,6 @@ thoughtspot:
 # See sql/databricks_sample_ecommerce.sql to stand up the tables.
 databricks:
   connection_name: "Sisense Migration - Databricks"
+  connection_fqn: ""    # the TS connection GUID (metadata/search type CONNECTION); bound into Table TML
   catalog: "workspace"
   schema: "sisense_demo"

@@ -39,6 +39,35 @@ def widget_chart_type(wtype: str) -> str | None:
     return CHART_TYPE_MAP.get(wtype, DEFAULT_CHART_TYPE)
 
 
+def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="COLUMN"):
+    """Build an Answer TML dict on a Model. `columns` are display names in order;
+    a model measure with aggregation appears as 'Total <col>' (e.g. 'Total Revenue').
+    Mirrors the cluster's exported answer shape: both a table and a chart block."""
+    chart = {"type": chart_type, "chart_columns": [{"column_id": c} for c in columns],
+             "client_state": "", "client_state_v2": ""}
+    if chart_type in ("COLUMN", "BAR", "LINE", "AREA") and len(columns) >= 2:
+        chart["axis_configs"] = [{"x": [columns[0]], "y": columns[1:]}]
+    return {
+        "name": name,
+        "display_mode": "CHART_MODE",
+        "tables": [{"id": model_name, "name": model_name, "fqn": model_fqn}],
+        "search_query": search_query,
+        "answer_columns": [{"name": c} for c in columns],
+        "table": {
+            "table_columns": [{"column_id": c} for c in columns],
+            "ordered_column_ids": list(columns),
+            "client_state": "", "client_state_v2": "",
+        },
+        "chart": chart,
+    }
+
+
+def liveboard_tml(name, answers):
+    """Wrap a list of Answer dicts into a Liveboard TML dict."""
+    viz = [{"id": f"Viz_{i+1}", "answer": a} for i, a in enumerate(answers)]
+    return {"liveboard": {"name": name, "visualizations": viz}}
+
+
 def dashboard_to_tml(
     dash: SourceDashboard,
     model_name: str,
