@@ -10,7 +10,7 @@ fixtures). Unknown types fall back to TABLE.
 """
 from __future__ import annotations
 
-from sisense2ts.ir.models import CoverageReport, SourceDashboard
+from sisense2ts.ir.models import Coverage, CoverageReport, SourceDashboard
 
 # Sisense widget type -> TML chart type. WS-D: confirm exact TML chart_type enum values
 # against thoughtspot_tml / Answer TML before wiring.
@@ -72,19 +72,72 @@ def liveboard_tml(name, answers):
     return {"liveboard": {"name": name, "visualizations": viz}}
 
 
-def dashboard_to_tml(
-    dash: SourceDashboard,
-    model_name: str,
-    report: CoverageReport | None = None,
-) -> dict:
-    """Return {"answers": [<Answer TML>...], "liveboard": <Liveboard TML>}.
+_AGG_PREFIX = {"SUM": "Total ", "COUNT": "Total ", "COUNT_DISTINCT": "Unique Count ",
+               "AVERAGE": "Average ", "MIN": "Min ", "MAX": "Max "}
 
-    TODO(WS-D):
-      - per widget -> Answer TML: chart type via widget_chart_type(); columns from
-        widget.fields (dimensions -> attributes, measures -> measures via map.formula);
-        attach widget + dashboard filters. Answer.tables references `model_name`.
-        Flag fallback/approx chart types as PARTIAL; richtext/BloX as MANUAL/skip.
-      - Liveboard TML: visualizations = those Answers (id "Viz 1", "Viz 2", ...);
-        layout.tiles ordered from dash.layout with a size per tile.
+
+def _model_col(dim: str) -> str:
+    """'[Table.Column Name]' -> 'Column Name' (the model column display name)."""
+    inner = (dim or "").strip().strip("[]")
+    return inner.split(".")[-1].strip() if inner else ""
+
+
+def _flag(report, name, reason):
+    if report:
+        report.add("widget", name, Coverage.MANUAL, reason)
+
+
+def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
+                     model_columns: list, report: CoverageReport | None = None) -> dict:
+    """IR dashboard -> {"answers": [<Answer TML>...], "liveboard": <Liveboard TML>}.
+
+    `model_columns` is the Model TML's `columns` list (each {name, properties:{column_type,
+    aggregation}}), so we know attributes vs measures and the aggregated display name
+    ('Total Revenue'). Each widget's fields are mapped to model columns by display name
+    (Sisense dim '[Table.Col]' -> 'Col'). Widgets that can't map cleanly (calculated
+    measures pending B1, fields not exposed on the model, text/no-chart widgets) are
+    skipped and logged as MANUAL coverage rather than breaking the import. Pure: the caller
+    validates each Answer and imports.
     """
-    raise NotImplementedError("WS-D: dashboard_to_tml")
+    attrs = {c["name"] for c in model_columns
+             if (c.get("properties") or {}).get("column_type") == "ATTRIBUTE"}
+    measures = {c["name"]: _AGG_PREFIX.get((c.get("properties") or {}).get("aggregation", "SUM"), "Total ") + c["name"]
+                for c in model_columns if (c.get("properties") or {}).get("column_type") == "MEASURE"}
+
+    answers = []
+    for w in dash.widgets:
+        ct = widget_chart_type(w.wtype)
+        if ct is None:
+            _flag(report, w.title, f"widget type {w.wtype} has no chart equivalent")
+            continue
+        if any(f.formula for f in w.fields):
+            _flag(report, w.title, "calculated measure (needs translate_formula / B1)")
+            continue
+        if not w.fields:
+            _flag(report, w.title, "no fields")
+            continue
+        tokens, cols, seen, ok = [], [], set(), True
+        for f in w.fields:
+            name = _model_col(f.dim)
+            if name in measures or f.agg:
+                disp = measures.get(name)
+            elif name in attrs:
+                disp = name
+            else:
+                disp = None
+            if not disp:
+                ok = False
+                break
+            if disp in seen:   # same dim used as category + break-by/filter -> keep once
+                continue
+            seen.add(disp)
+            tokens.append(f"[{name}]")
+            cols.append(disp)
+        if not ok or not cols:
+            _flag(report, w.title, "a field maps to no model column (dropped ID / custom / unexposed)")
+            continue
+        answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(tokens), cols, ct))
+        if report:
+            report.add("widget", w.title, Coverage.AUTO, ct)
+
+    return {"answers": answers, "liveboard": liveboard_tml(dash.title or model_name, answers)}

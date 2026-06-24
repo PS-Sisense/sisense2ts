@@ -45,7 +45,12 @@ def run(config: dict, dashboard_oid: str, out_dir: Path, dry_run: bool = False) 
         ir_model, dbx["connection_name"], dbx.get("connection_fqn", ""),
         dbx["catalog"], dbx["schema"], report=report,
     )
-    content_tml = map_content.dashboard_to_tml(ir_dash, ir_model.name, report)  # TODO(C1/C2): WIP
+    # A7 (WIP): the real flow imports the Model first, reads its guid, then builds content
+    # bound to that fqn (see scripts/land_demo.py). Placeholder fqn until A7 wires two phases.
+    content_tml = map_content.dashboard_to_tml(
+        ir_dash, ir_model.name, model_fqn="TODO-model-guid",
+        model_columns=model_bundle["model"]["model"]["columns"], report=report,
+    )
 
     # 3. LOAD (WS-E)
     tmls = [yaml.safe_dump(t, sort_keys=False) for t in (*model_bundle["tables"], model_bundle["model"])]
