@@ -2,30 +2,30 @@
 """End-to-end demo runner: Sisense Sample ECommerce -> ThoughtSpot Model + Liveboard.
 
 Extracts the Sisense data model over REST, generates Table + Model TML and imports it,
-then builds a Liveboard of Answers on that Model and imports it. The objects query
-Databricks live. Reads all hosts/tokens from config.yaml (gitignored).
+then builds a Liveboard (KPIs + charts) on that Model and imports it. The objects query
+Databricks live. Auth mints a fresh token from the trusted-auth secret_key in config.yaml.
 
     python scripts/land_demo.py
 
-Note: the Liveboard here uses a curated set of Answers on the model (proven working).
-Full per-widget mapping from the Sisense dashboard lives in map/content.dashboard_to_tml
-and is still being hardened (C1/C2).
+Note: the Liveboard uses a curated set of Answers on the model (proven working). Full
+per-widget mapping from the Sisense dashboard lives in map/content.dashboard_to_tml and
+is still being hardened (C1/C2).
 """
-import json
-import ssl
-import urllib.error
-import urllib.request
-
 import yaml
 
 from sisense2ts.extract import parse
 from sisense2ts.extract.sisense_client import SisenseClient
+from sisense2ts.load import ts_client
 from sisense2ts.map.content import answer_tml, liveboard_tml
 from sisense2ts.map.model import model_to_tml
 
 MODEL_NAME = "Sample ECommerce (Sisense)"
 # (name, search_query, ordered column display names, chart type)
 LIVEBOARD_SPECS = [
+    ("Total Revenue", "[Revenue]", ["Total Revenue"], "KPI"),
+    ("Total Units Sold", "[Quantity]", ["Total Quantity"], "KPI"),
+    ("Total Cost", "[Cost]", ["Total Cost"], "KPI"),
+    ("Total Brands", "unique count [Brand]", ["Unique Number of Brand"], "KPI"),
     ("Revenue by Country", "[Country] [Revenue]", ["Country", "Total Revenue"], "COLUMN"),
     ("Revenue by Brand", "[Brand] [Revenue]", ["Brand", "Total Revenue"], "COLUMN"),
     ("Revenue by Category", "[Category] [Revenue]", ["Category", "Total Revenue"], "BAR"),
@@ -33,21 +33,12 @@ LIVEBOARD_SPECS = [
     ("Units Sold by Age Range", "[Age Range] [Quantity]", ["Age Range", "Total Quantity"], "COLUMN"),
     ("Revenue Trend", "[Date] [Revenue]", ["Date", "Total Revenue"], "LINE"),
 ]
-_CTX = ssl._create_unverified_context()
-
-
-def ts_import(ts, tmls, policy="ALL_OR_NONE"):
-    req = urllib.request.Request(
-        ts["base_url"].rstrip("/") + "/api/rest/2.0/metadata/tml/import",
-        data=json.dumps({"metadata_tmls": tmls, "import_policy": policy}).encode(), method="POST",
-        headers={"Content-Type": "application/json", "Accept": "application/json",
-                 "Authorization": "Bearer " + ts["token"]})
-    return json.loads(urllib.request.urlopen(req, timeout=180, context=_CTX).read().decode())
 
 
 def main():
     cfg = yaml.safe_load(open("config.yaml"))
     S, D, T = cfg["sisense"], cfg["databricks"], cfg["thoughtspot"]
+    token = ts_client.get_token(T)
 
     # 1. extract the Sample ECommerce data model from Sisense
     sc = SisenseClient(S["base_url"], S["token"])
@@ -62,22 +53,27 @@ def main():
                        model_name=MODEL_NAME)
     tmls = [yaml.safe_dump(t, sort_keys=False) for t in out["tables"]] + [yaml.safe_dump(out["model"], sort_keys=False)]
     model_fqn = None
-    for r in ts_import(T, tmls):
-        h = (r.get("response") or {}).get("header") or {}
-        st = ((r.get("response") or {}).get("status") or {}).get("status_code")
-        print(f"  model: {st} {h.get('type')} {h.get('name')}")
-        if (h.get("name") == MODEL_NAME):
-            model_fqn = h.get("id_guid")
+    for item in ts_client.import_tml(T["base_url"], token, tmls):
+        code, name, guid = ts_client.status_of(item)
+        print(f"  model: {code} {name}")
+        if name == MODEL_NAME:
+            model_fqn = guid
     if not model_fqn:
         raise SystemExit("model import did not return a guid")
 
-    # 3. build + import the Liveboard on the model
-    answers = [answer_tml(n, MODEL_NAME, model_fqn, q, cols, ct) for (n, q, cols, ct) in LIVEBOARD_SPECS]
+    # 3. build + import the Liveboard on the model (skip any viz type that fails validation)
+    answers = []
+    for n, q, cols, ct in LIVEBOARD_SPECS:
+        a = answer_tml(n, MODEL_NAME, model_fqn, q, cols, ct)
+        res = ts_client.import_tml(T["base_url"], token, [yaml.safe_dump(liveboard_tml("v", [a]), sort_keys=False)], "VALIDATE_ONLY")
+        if ts_client.status_of(res[0])[0] != "ERROR":
+            answers.append(a)
+        else:
+            print(f"  skip viz '{n}' ({ct}) - failed validation")
     lb = yaml.safe_dump(liveboard_tml(MODEL_NAME, answers), sort_keys=False)
-    for r in ts_import(T, [lb]):
-        h = (r.get("response") or {}).get("header") or {}
-        st = ((r.get("response") or {}).get("status") or {}).get("status_code")
-        print(f"  liveboard: {st} {h.get('name')} guid={h.get('id_guid')}")
+    for item in ts_client.import_tml(T["base_url"], token, [lb]):
+        code, name, guid = ts_client.status_of(item)
+        print(f"  liveboard: {code} {name} ({len(answers)} viz) guid={guid}")
 
 
 if __name__ == "__main__":
