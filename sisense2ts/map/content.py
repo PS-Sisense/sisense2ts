@@ -47,8 +47,16 @@ def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="C
     dims = [c for c in columns if c not in measures]
     chart = {"type": chart_type, "chart_columns": [{"column_id": c} for c in columns],
              "client_state": "", "client_state_v2": ""}
-    if chart_type in ("COLUMN", "BAR", "LINE", "AREA", "STACKED_COLUMN") and len(columns) >= 2:
-        chart["axis_configs"] = [{"x": dims, "y": measures or [columns[-1]]}]
+    if chart_type == "SCATTER" and measures:        # x/y are measures; first dim -> color
+        ax = {"x": measures[:1], "y": measures[1:2] or measures[:1]}
+        if dims:
+            ax["color"] = dims[:1]
+        chart["axis_configs"] = [ax]
+    elif chart_type in ("COLUMN", "BAR", "LINE", "AREA", "STACKED_COLUMN", "STACKED_BAR") and len(columns) >= 2:
+        ax = {"x": dims[:1] or [columns[0]], "y": measures or [columns[-1]]}
+        if len(dims) > 1:                            # extra dimensions become series/color
+            ax["color"] = dims[1:]
+        chart["axis_configs"] = [ax]
     elif chart_type == "KPI":  # KPI needs the measure under y, even with no dimension
         chart["axis_configs"] = [{"y": measures or columns}]
     return {
@@ -118,6 +126,8 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
             continue
         tokens, cols, seen, ok = [], [], set(), True
         for f in w.fields:
+            if f.panel == "filters":   # a filter, not a column to plot
+                continue
             name = _model_col(f.dim)
             if name in measures or f.agg:
                 disp = measures.get(name)

@@ -129,6 +129,7 @@ class Field:
     dim: Optional[str] = None        # e.g. "[Commerce.Revenue]"
     agg: Optional[str] = None        # sum, avg, count, ... (simple measures)
     title: str = ""
+    panel: str = ""                  # source JAQL panel: categories | values | break by | filters
     formula: Optional[Formula] = None  # set when this is a calculated measure
     fmt: dict = field(default_factory=dict)  # Sisense format block, if any
     raw: dict = field(default_factory=dict)

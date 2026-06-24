@@ -116,8 +116,9 @@ def parse_datamodel(raw: dict) -> SourceModel:
 # --------------------------------------------------------------------------- #
 def _items(widget: dict):
     for panel in (widget.get("metadata") or {}).get("panels", []) or []:
+        pname = panel.get("name") or ""
         for item in panel.get("items", []) or []:
-            yield item
+            yield pname, item
 
 
 def _jaql_to_field(jaql: dict) -> Field | None:
@@ -143,10 +144,11 @@ def _jaql_to_field(jaql: dict) -> Field | None:
 def parse_widget(widget: dict) -> SourceWidget:
     fields: list[Field] = []
     filters: list[SourceFilter] = []
-    for item in _items(widget):
+    for pname, item in _items(widget):
         jaql = item.get("jaql") or {}
         field = _jaql_to_field(jaql)
         if field:
+            field.panel = pname
             fields.append(field)
         if jaql.get("filter"):
             sf = classify_filter(jaql)
