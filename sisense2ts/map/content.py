@@ -57,7 +57,10 @@ def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="C
         if len(dims) > 1:                            # extra dimensions become series/color
             ax["color"] = dims[1:]
         chart["axis_configs"] = [ax]
-    elif chart_type == "KPI":  # KPI needs the measure under y, even with no dimension
+    elif chart_type in ("PIE", "DONUT") and len(columns) >= 2:  # category x, measure y (TS-native pie shape)
+        chart["axis_configs"] = [{"x": dims[:1] or [columns[0]], "y": measures or [columns[-1]]}]
+    elif chart_type == "KPI":  # measure under y ONLY. The TS-native export's x+y needs the
+        # client_state_v2 axisProperties we don't emit; adding a bare x here 400s ("invalid axis").
         chart["axis_configs"] = [{"y": measures or columns}]
     return {
         "name": name,

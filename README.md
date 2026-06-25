@@ -4,7 +4,7 @@ Convert Sisense BI assets (data model + dashboards) into ThoughtSpot TML, import
 into a ThoughtSpot instance, and report what converted automatically versus what needs
 a human. Built to accelerate Sisense to ThoughtSpot migrations in Professional Services.
 
-**Project docs:** [Plan & tasks](pm/PLAN.md) · [Architecture](ARCHITECTURE.md) · [Contributing & workflow](CONTRIBUTING.md)
+**Project docs:** [Plan & tasks](pm/PLAN.md) · [Architecture](ARCHITECTURE.md) · [Contributing & workflow](CONTRIBUTING.md) · [Skill: sisense-to-thoughtspot](.claude/skills/sisense-to-thoughtspot/SKILL.md)
 
 ## The target (demo, Friday June 26)
 
@@ -27,6 +27,21 @@ pytest -q                       # baseline must be green
 cp config.example.yaml config.yaml   # then fill in trial creds (gitignored)
 python -m sisense2ts.cli --config config.yaml --dashboard <oid> --out ./out --dry-run
 ```
+
+## Run it as a Claude skill
+
+The pipeline is also packaged as a **Claude Code skill** at
+[`.claude/skills/sisense-to-thoughtspot/`](.claude/skills/sisense-to-thoughtspot/SKILL.md).
+The skill is the conductor; this `sisense2ts` package is the deterministic
+converter it drives (the skill's `scripts/`). The `SKILL.md` walks the phased
+arc (Discover → Convert model → Import + read back GUID → Build content → Layout
+→ Parity → Coverage), and `refs/` holds the hard-won specifics:
+[chart-types](.claude/skills/sisense-to-thoughtspot/refs/chart-types.md),
+[tml-gotchas](.claude/skills/sisense-to-thoughtspot/refs/tml-gotchas.md),
+[jaql-mapping](.claude/skills/sisense-to-thoughtspot/refs/jaql-mapping.md). Post-demo
+this lifts into an installable plugin marketplace (one plugin per source BI
+tool), alongside a read-only `sisense-assessment` skill for scoping. Pattern
+borrowed from Sigma's [BI-migration skill marketplace](https://github.com/twells89/sigma-migration-skills).
 
 ## Architecture
 
