@@ -19,21 +19,23 @@ A JAQL item with a plain `agg` (no formula) maps to a TML aggregation keyword:
 | `countduplicates` | `COUNT`           | PARTIAL (approx of DupCount) |
 | `median`, `stdevp`, `varp`, `mode` | — | MANUAL (no clean TML agg) |
 
-## Calculated formulas — `translate_formula(formula)` 🔜 WIP (B1 / Pooja)
+## Calculated formulas — `translate_formula(formula)` ✅ implemented (B1 / Pooja)
 
-Not yet implemented (`raise NotImplementedError`). When built, the plan:
+Implemented in `map/formula.py`. Full function table, caveats, and examples:
+[`sisense-formula-translation.md`](sisense-formula-translation.md). The logic:
 
 1. Resolve `context` placeholders (e.g. `[users]` → its dim/agg) to a flat
-   expression over real column references.
-2. Tokenize the formula; map function names via `FUNCTION_MAP`.
+   expression over real column references (nested formulas recurse).
+2. Map function names via `FUNCTION_MAP`.
 3. Any token in `UNSUPPORTED` (or unknown) → **MANUAL**, `expr=None`, note the
    offending function, keep `source`.
 4. Plain arithmetic + supported funcs → **AUTO**.
 5. `case`/conditional or `countduplicates` → **PARTIAL** with a note.
 
 **Supported function subset** (`FUNCTION_MAP`, confident 1:1 only): `sum avg
-count min max abs round(→round) ceiling(→ceil) floor power(→pow) sqrt exp mod
-if isnull(→is_null)`.
+average count min max median abs round ceiling(→ceil) floor power(→pow) sqrt exp
+mod ln log10 sign stdev(→stddev) var(→variance) if isnull ifnull`. (TS spells it
+`isnull`, not `is_null`.) Full table: [`sisense-formula-translation.md`](sisense-formula-translation.md).
 
 **Explicitly unsupported → MANUAL** (`UNSUPPORTED`): `rank ordering rsum prev
 next all now past* growth* diff* ytd*/mtd*/qtd*/wtd* rpsum rpavg percentile
