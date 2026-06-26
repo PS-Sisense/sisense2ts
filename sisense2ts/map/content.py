@@ -370,13 +370,21 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
         if not ok or not cols:
             _flag(report, w.title, reason or "no mappable fields")
             continue
+        top_n = None
         for sf in list(w.filters) + list(dash.filters):   # H5: widget + dashboard filters -> search tokens
+            if sf.kind is FilterKind.TOP_N:                # top-N -> a leading "top N" search keyword
+                try:
+                    top_n = int(sf.values[0])
+                except (TypeError, ValueError, IndexError):
+                    pass
+                continue
             ftok, fnote = _filter_token(sf, attrs, measures)
             if ftok and ftok not in tokens:
                 tokens.append(ftok)
             elif fnote and cov is Coverage.AUTO:
                 cov, level_note = Coverage.PARTIAL, fnote
-        answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(tokens), cols, ct,
+        search_tokens = ([f"top {top_n}"] if top_n else []) + tokens   # "top 3 [Revenue] [Category] ..."
+        answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(search_tokens), cols, ct,
                                   formulas=formulas, roles=roles, formats=formats))
         answer_widgets.append(w.oid)
         if report:

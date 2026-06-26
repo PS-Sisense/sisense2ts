@@ -6,7 +6,9 @@ from sisense2ts.ir.models import (
     CoverageReport,
     Field,
     FieldKind,
+    FilterKind,
     SourceDashboard,
+    SourceFilter,
     SourceWidget,
     TilePosition,
 )
@@ -81,6 +83,20 @@ def test_date_bucket_suffix():
     assert date_bucket_suffix("dayofweek") is None
     assert date_bucket_suffix("fortnight") is None
     assert date_bucket_suffix(None) is None
+
+
+def test_top_n_filter_prepends_keyword():
+    # a TOP_N filter -> a leading "top N" search keyword (base measure name), AUTO not PARTIAL.
+    w = SourceWidget(oid="1", title="Top Cats", wtype="chart/bar",
+                     fields=[Field(kind=FieldKind.DIMENSION, dim="[Category.Category]", panel="categories"),
+                             Field(kind=FieldKind.MEASURE, dim="[Commerce.Revenue]", agg="sum", panel="values")],
+                     filters=[SourceFilter(FilterKind.TOP_N, "[Category.Category]", "top", [3])])
+    mcols = [{"name": "Category", "properties": {"column_type": "ATTRIBUTE"}},
+             {"name": "Revenue", "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]
+    rep = CoverageReport()
+    out = dashboard_to_tml(SourceDashboard(oid="d", title="D", widgets=[w]), "M", "fqn", mcols, rep)
+    assert out["answers"][0]["search_query"].startswith("top 3 ")
+    assert all(it.coverage is not Coverage.PARTIAL for it in rep.items)
 
 
 def test_liveboard_layout_faithful_grid():
