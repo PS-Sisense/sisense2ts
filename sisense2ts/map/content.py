@@ -10,7 +10,7 @@ fixtures). Unknown types fall back to TABLE.
 """
 from __future__ import annotations
 
-from sisense2ts.ir.models import Coverage, CoverageReport, SourceDashboard
+from sisense2ts.ir.models import Coverage, CoverageReport, FilterKind, SourceDashboard
 from sisense2ts.map.formula import translate_formula
 
 # Sisense widget type -> TML chart type. WS-D: confirm exact TML chart_type enum values
@@ -65,28 +65,24 @@ def _panel_role(panel: str):
     return _PANEL_ROLE[p] if p in _PANEL_ROLE else ""   # "" => default by field kind later
 
 
-# Sisense date-dimension `level` -> ThoughtSpot search date keyword, emitted as its own
-# bracketed token next to the date column, e.g. "[Order Date] [monthly] [Revenue]" (H2).
-# BUCKET = continuous granularity (keeps a time series); PART = cyclic extraction
-# (e.g. day-of-week, for seasonality). Unmapped levels emit no token and flag PARTIAL.
+# Sisense date-dimension `level` -> ThoughtSpot date BUCKET, attached to the column token
+# as `[Col].MONTHLY` (NOT a separate token) (H2). Live-validated: `[Date].MONTHLY` groups by
+# month; a standalone `[monthly]` token is read as a missing column and 400s. Cyclic date
+# PARTS (day-of-week, etc.) have a different, unverified syntax -> flagged PARTIAL for now.
 DATE_BUCKET_MAP: dict[str, str] = {
-    "hours": "hourly", "days": "daily", "weeks": "weekly",
-    "months": "monthly", "quarters": "quarterly", "years": "yearly",
+    "hours": "HOURLY", "days": "DAILY", "weeks": "WEEKLY",
+    "months": "MONTHLY", "quarters": "QUARTERLY", "years": "YEARLY",
 }
-DATE_PART_MAP: dict[str, str] = {
-    "dayofweek": "day of week", "daysofweek": "day of week", "weekday": "day of week",
-    "dayofmonth": "day of month", "dayinmonth": "day of month", "dayofquarter": "day of quarter",
-    "dayofyear": "day of year", "monthofyear": "month of year", "monthsofyear": "month of year",
-    "weekofyear": "week of year", "weeksofyear": "week of year", "hourofday": "hour of day",
-}
+DATE_PART_LEVELS: frozenset[str] = frozenset({
+    "dayofweek", "daysofweek", "weekday", "dayofmonth", "dayinmonth", "dayofquarter",
+    "dayofyear", "monthofyear", "monthsofyear", "weekofyear", "weeksofyear", "hourofday",
+})
 
 
-def date_level_token(level: str | None) -> str | None:
-    """Sisense date `level` -> a bracketed TS search token ('[monthly]', '[day of week]');
-    None if unmapped (caller flags PARTIAL)."""
-    key = (level or "").lower()
-    kw = DATE_BUCKET_MAP.get(key) or DATE_PART_MAP.get(key)
-    return f"[{kw}]" if kw else None
+def date_bucket_suffix(level: str | None) -> str | None:
+    """Sisense date `level` -> a TS bucket suffix ('MONTHLY') for `[Col].MONTHLY`; None for
+    cyclic parts / unmapped levels (caller flags PARTIAL)."""
+    return DATE_BUCKET_MAP.get((level or "").lower())
 
 
 def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="COLUMN",
@@ -185,6 +181,26 @@ def _flag(report, name, reason):
         report.add("widget", name, Coverage.MANUAL, reason)
 
 
+def _filter_token(sf, attrs, measures):
+    """A SourceFilter -> a ThoughtSpot search token ('[Gender] != 'Unspecified''), plus a
+    PARTIAL note when a filter is recognized but not applied. Returns (token, note); both
+    may be empty. Filters on columns the model doesn't expose, and 'all'/empty controls,
+    are silently skipped (no restriction)."""
+    col = _model_col(sf.dim)
+    if col not in attrs and col not in measures:
+        col = col.split(" (")[0].strip()
+    if col not in attrs and col not in measures:
+        return "", ""
+    q = lambda v: f"'{v}'" if isinstance(v, str) else str(v)
+    if sf.kind is FilterKind.MEMBER and sf.values:
+        return f"[{col}] = " + " ".join(q(v) for v in sf.values), ""
+    if sf.kind is FilterKind.EXCLUDE and sf.values:
+        return f"[{col}] != " + " ".join(q(v) for v in sf.values), ""
+    if sf.kind is FilterKind.TOP_N:
+        return "", f"top-N on [{col}] not applied (display cap)"
+    return "", ""
+
+
 def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                      model_columns: list, report: CoverageReport | None = None) -> dict:
     """IR dashboard -> {"answers": [<Answer TML>...], "liveboard": <Liveboard TML>}.
@@ -267,18 +283,25 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
             if disp in seen:   # same dim used as category + break-by/filter -> keep once
                 continue
             seen.add(disp)
-            tokens.append(f"[{name}]")
+            col_tok = f"[{name}]"
+            if f.level:   # date granularity (H2) -> bucket attached to the column: [Col].MONTHLY
+                suf = date_bucket_suffix(f.level)
+                if suf:
+                    col_tok = f"[{name}].{suf}"
+                elif cov is Coverage.AUTO:
+                    cov, level_note = Coverage.PARTIAL, f"date level '{f.level}' not applied (cyclic part / unmapped)"
+            tokens.append(col_tok)
             cols.append(disp)
             roles[disp] = role or "x"
-            if f.level:   # date granularity/part (H2) -> a TS keyword token right after its column
-                tok = date_level_token(f.level)
-                if tok:
-                    tokens.append(tok)
-                elif cov is Coverage.AUTO:
-                    cov, level_note = Coverage.PARTIAL, f"date level '{f.level}' has no TS keyword; emitted ungrouped"
         if not ok or not cols:
             _flag(report, w.title, reason or "no mappable fields")
             continue
+        for sf in list(w.filters) + list(dash.filters):   # H5: widget + dashboard filters -> search tokens
+            ftok, fnote = _filter_token(sf, attrs, measures)
+            if ftok and ftok not in tokens:
+                tokens.append(ftok)
+            elif fnote and cov is Coverage.AUTO:
+                cov, level_note = Coverage.PARTIAL, fnote
         answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(tokens), cols, ct,
                                   formulas=formulas, roles=roles))
         if report:

@@ -9,7 +9,7 @@ from sisense2ts.ir.models import (
     SourceDashboard,
     SourceWidget,
 )
-from sisense2ts.map.content import dashboard_to_tml, date_level_token
+from sisense2ts.map.content import dashboard_to_tml, date_bucket_suffix
 from sisense2ts.map.model import model_to_tml
 
 
@@ -59,31 +59,31 @@ def test_date_level_emits_bucket_token(raw_datamodel, raw_dashboard_rich):
     out = dashboard_to_tml(dash, "M", "model-fqn", mcols)
 
     trend = next(a for a in out["answers"] if a["name"] == "Revenue Trend")
-    assert trend["search_query"] == "[Order Date] [monthly] [Revenue]"
+    # H2: the date bucket attaches to the column ([Order Date].MONTHLY) - live-validated;
+    # a standalone [monthly] token 400s. H5 may append dashboard filter tokens after.
+    assert trend["search_query"].startswith("[Order Date].MONTHLY [Revenue]")
     # the bucket is a search modifier only, not an extra answer column
     assert [c["name"] for c in trend["answer_columns"]] == ["Order Date", "Total Revenue"]
 
 
-def test_date_level_token_buckets_and_parts():
-    # continuous granularity buckets
-    assert date_level_token("months") == "[monthly]"
-    assert date_level_token("years") == "[yearly]"
-    # cyclic date-part extraction (incl. common Sisense spelling aliases)
-    assert date_level_token("dayofweek") == "[day of week]"
-    assert date_level_token("monthofyear") == "[month of year]"
-    assert date_level_token("weekday") == "[day of week]"
-    # unmapped -> no token
-    assert date_level_token("fortnight") is None
-    assert date_level_token(None) is None
+def test_date_bucket_suffix():
+    # continuous granularity -> a TS column bucket suffix ([Order Date].MONTHLY)
+    assert date_bucket_suffix("months") == "MONTHLY"
+    assert date_bucket_suffix("years") == "YEARLY"
+    # cyclic parts + unmapped -> no bucket (caller flags PARTIAL)
+    assert date_bucket_suffix("dayofweek") is None
+    assert date_bucket_suffix("fortnight") is None
+    assert date_bucket_suffix(None) is None
 
 
-def test_date_part_emits_keyword_token():
-    # H2: a date-PART level (day of week) maps to its TS keyword, AUTO (not PARTIAL).
+def test_date_part_is_partial():
+    # A cyclic date PART (day of week) uses a different, unverified TS syntax, so we don't
+    # emit a possibly-broken token; the widget still maps (ungrouped) and is flagged PARTIAL.
     dash = SourceDashboard(oid="d", title="D", widgets=[_date_widget("dayofweek")])
     rep = CoverageReport()
     out = dashboard_to_tml(dash, "M", "fqn", _DATE_MCOLS, rep)
-    assert out["answers"][0]["search_query"] == "[Order Date] [day of week] [Revenue]"
-    assert all(it.coverage is Coverage.AUTO for it in rep.items)
+    assert out["answers"][0]["search_query"] == "[Order Date] [Revenue]"
+    assert any(it.coverage is Coverage.PARTIAL for it in rep.items)
 
 
 def test_unmapped_date_level_is_partial():
