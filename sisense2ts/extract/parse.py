@@ -138,7 +138,7 @@ def _jaql_to_field(jaql: dict) -> Field | None:
     else:
         kind, f = FieldKind.DIMENSION, None
     return Field(kind=kind, dim=dim, agg=agg, title=jaql.get("title") or "", formula=f,
-                 fmt=jaql.get("format") or {}, raw=jaql)
+                 level=jaql.get("level"), fmt=jaql.get("format") or {}, raw=jaql)
 
 
 def parse_widget(widget: dict) -> SourceWidget:

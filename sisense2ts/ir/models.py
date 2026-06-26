@@ -131,6 +131,7 @@ class Field:
     title: str = ""
     panel: str = ""                  # source JAQL panel: categories | values | break by | filters
     formula: Optional[Formula] = None  # set when this is a calculated measure
+    level: Optional[str] = None      # date-dimension granularity (days/weeks/months/quarters/years); WS-D -> TS date bucket
     fmt: dict = field(default_factory=dict)  # Sisense format block, if any
     raw: dict = field(default_factory=dict)
 

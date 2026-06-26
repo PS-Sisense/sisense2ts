@@ -34,9 +34,53 @@ CHART_TYPE_MAP: dict[str, str] = {
 }
 DEFAULT_CHART_TYPE = "TABLE"
 
+# Sisense date-dimension `level` -> ThoughtSpot search date keyword. In a search query the
+# keyword is its own bracketed token next to the date column, e.g.
+# "[Order Date] [monthly] [Revenue]". Two flavours of level:
+#
+#   * BUCKET (continuous granularity) -> TS bucket keyword. Groups chronologically; a
+#     "Revenue by Month" trend stays a time series. Without it the trend collapses to raw date.
+#   * PART (cyclic extraction, e.g. dayofweek/monthofyear) -> TS date-part keyword. Collapses
+#     across periods (e.g. all Januaries together) for seasonality analysis.
+#
+# Keywords confirmed against the TS keyword reference + Time series analysis docs. Sisense
+# `level` spellings vary by version, so common aliases are included; confirm against real
+# exports. Anything unmapped emits no token and is flagged PARTIAL by the caller.
+DATE_BUCKET_MAP: dict[str, str] = {
+    "hours": "hourly",
+    "days": "daily",
+    "weeks": "weekly",
+    "months": "monthly",
+    "quarters": "quarterly",
+    "years": "yearly",
+}
+
+DATE_PART_MAP: dict[str, str] = {
+    "dayofweek": "day of week",
+    "daysofweek": "day of week",
+    "weekday": "day of week",
+    "dayofmonth": "day of month",
+    "dayinmonth": "day of month",
+    "dayofquarter": "day of quarter",
+    "dayofyear": "day of year",
+    "monthofyear": "month of year",
+    "monthsofyear": "month of year",
+    "weekofyear": "week of year",
+    "weeksofyear": "week of year",
+    "hourofday": "hour of day",
+}
+
 
 def widget_chart_type(wtype: str) -> str | None:
     return CHART_TYPE_MAP.get(wtype, DEFAULT_CHART_TYPE)
+
+
+def date_level_token(level: str | None) -> str | None:
+    """Sisense date `level` -> a bracketed TS search token ('[monthly]', '[day of week]'),
+    checking bucket granularities then cyclic date parts. None if unmapped."""
+    key = (level or "").lower()
+    kw = DATE_BUCKET_MAP.get(key) or DATE_PART_MAP.get(key)
+    return f"[{kw}]" if kw else None
 
 
 def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="COLUMN"):
@@ -127,7 +171,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
         if not w.fields:
             _flag(report, w.title, "no fields")
             continue
-        tokens, cols, seen, ok = [], [], set(), True
+        tokens, cols, seen, ok, level_note = [], [], set(), True, ""
         for f in w.fields:
             if f.panel == "filters":   # a filter, not a column to plot
                 continue
@@ -146,11 +190,20 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
             seen.add(disp)
             tokens.append(f"[{name}]")
             cols.append(disp)
+            if f.level:   # date granularity/part -> a TS keyword token right after its column
+                tok = date_level_token(f.level)
+                if tok:
+                    tokens.append(tok)
+                else:
+                    level_note = f"date level '{f.level}' has no TS keyword; emitted ungrouped"
         if not ok or not cols:
             _flag(report, w.title, "a field maps to no model column (dropped ID / custom / unexposed)")
             continue
         answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(tokens), cols, ct))
         if report:
-            report.add("widget", w.title, Coverage.AUTO, ct)
+            if level_note:
+                report.add("widget", w.title, Coverage.PARTIAL, level_note)
+            else:
+                report.add("widget", w.title, Coverage.AUTO, ct)
 
     return {"answers": answers, "liveboard": liveboard_tml(dash.title or model_name, answers)}

@@ -40,16 +40,46 @@ next all now past* growth* diff* ytd*/mtd*/qtd*/wtd* rpsum rpavg percentile
 quartile correl covar slope rdouble rint`. These are time-intelligence / window
 / statistical functions with no confident TML 1:1.
 
-## Date dimensions carry a `level` (granularity) — current IR gap
+## Date dimensions carry a `level` (granularity) — H2 ✅ implemented
 
 A JAQL date dimension item looks like
-`{ "jaql": { "dim": "[Commerce.Date]", "level": "months" } }`. The `level`
-(`days`/`weeks`/`months`/`quarters`/`years`) is the time bucketing the widget
-plots by. Our IR `Field` does NOT capture `level` today, so a "Revenue by Month"
-trend loses its bucket and falls back to raw date. Additive IR fix: add
-`level: Optional[str]` to `Field`, set it in `parse._jaql_to_field`, and emit the
-matching ThoughtSpot date bucket in the search query. (Cross-checked against the
-sisense-to-sigma `jaql-mapping.md`, which documents the same item shape.)
+`{ "jaql": { "dim": "[Commerce.Date]", "level": "months" } }`. The `level` is the
+time grain the widget plots by. The IR `Field` now carries it
+(`level: Optional[str]`, additive — set in `parse._jaql_to_field`), and
+`map/content.py` emits the matching **ThoughtSpot date keyword** as its own bracketed
+token right after the date column in the search query. Two flavours:
+
+**Bucket** — continuous granularity, keeps chronology (a time series). `DATE_BUCKET_MAP`:
+
+| Sisense `level` | TS token | so "Revenue Trend" emits |
+|---|---|---|
+| `days` | `[daily]` | `[Order Date] [daily] [Revenue]` |
+| `weeks` | `[weekly]` | … |
+| `months` | `[monthly]` | `[Order Date] [monthly] [Revenue]` (was `[Order Date] [Revenue]`) |
+| `quarters` | `[quarterly]` | … |
+| `years` | `[yearly]` | … |
+| `hours` | `[hourly]` | (DateTime only) |
+
+**Date part** — cyclic extraction, collapses across periods (all Januaries together)
+for seasonality. `DATE_PART_MAP`:
+
+| Sisense `level` (+ aliases) | TS token |
+|---|---|
+| `dayofweek` / `weekday` | `[day of week]` |
+| `dayofmonth` / `dayinmonth` | `[day of month]` |
+| `dayofquarter` | `[day of quarter]` |
+| `dayofyear` | `[day of year]` |
+| `monthofyear` | `[month of year]` |
+| `weekofyear` | `[week of year]` |
+| `hourofday` | `[hour of day]` |
+
+The keyword is a **search modifier**, not an extra answer column. A level with no
+mapping (e.g. an unrecognised spelling) emits no token and the widget is flagged
+**PARTIAL** ("emitted ungrouped"), never silently dropped or faked. Sisense `level`
+spellings vary by version, so common aliases are included — confirm the exact strings
+against real exports. Keywords confirmed against the
+[Keyword reference](https://docs.thoughtspot.com/cloud/26.6.0.cl/keywords) and
+[Time series analysis](https://docs.thoughtspot.com/cloud/latest/search-time) docs.
 
 ## Where formulas get flagged in the pipeline
 
