@@ -11,6 +11,7 @@ fixtures). Unknown types fall back to TABLE.
 from __future__ import annotations
 
 from sisense2ts.ir.models import Coverage, CoverageReport, SourceDashboard
+from sisense2ts.map.formula import translate_formula
 
 # Sisense widget type -> TML chart type. WS-D: confirm exact TML chart_type enum values
 # against thoughtspot_tml / Answer TML before wiring.
@@ -34,79 +35,112 @@ CHART_TYPE_MAP: dict[str, str] = {
 }
 DEFAULT_CHART_TYPE = "TABLE"
 
-# Sisense date-dimension `level` -> ThoughtSpot search date keyword. In a search query the
-# keyword is its own bracketed token next to the date column, e.g.
-# "[Order Date] [monthly] [Revenue]". Two flavours of level:
-#
-#   * BUCKET (continuous granularity) -> TS bucket keyword. Groups chronologically; a
-#     "Revenue by Month" trend stays a time series. Without it the trend collapses to raw date.
-#   * PART (cyclic extraction, e.g. dayofweek/monthofyear) -> TS date-part keyword. Collapses
-#     across periods (e.g. all Januaries together) for seasonality analysis.
-#
-# Keywords confirmed against the TS keyword reference + Time series analysis docs. Sisense
-# `level` spellings vary by version, so common aliases are included; confirm against real
-# exports. Anything unmapped emits no token and is flagged PARTIAL by the caller.
+
+def widget_chart_type(wtype: str, subtype: str = "") -> str | None:
+    base = CHART_TYPE_MAP.get(wtype, DEFAULT_CHART_TYPE)
+    st = (subtype or "").lower()
+    if base in ("BAR", "COLUMN") and "stacked" in st:
+        return "STACKED_" + base       # bar/stacked -> STACKED_BAR, column/stacked -> STACKED_COLUMN
+    if base == "SCATTER" and ("bubble" in st or wtype == "chart/bubble"):
+        return "ADVANCED_BUBBLE"       # TS bubble = ADVANCED_BUBBLE (x/y/slice/color/size dims)
+    return base
+
+
+# Sisense JAQL panel name -> axis role. Drives faithful axis assignment so a widget's
+# columns land where the source put them (x/y/color/size) instead of being guessed.
+# None => not a plotted column (gauge bounds, filters). "grain" => a column but no axis
+# (e.g. a scatter/bubble's point dimension). Unknown panels default by field kind.
+_PANEL_ROLE: dict[str, str | None] = {
+    "categories": "x", "x-axis": "x", "rows": "x",
+    "values": "y", "y-axis": "y", "value": "y",
+    "break by": "color", "break by / color": "color", "color": "color", "break-by": "color",
+    "size": "size",
+    "point": "grain",
+    "min": None, "max": None, "filters": None,
+}
+
+
+def _panel_role(panel: str):
+    p = (panel or "").strip().lower()
+    return _PANEL_ROLE[p] if p in _PANEL_ROLE else ""   # "" => default by field kind later
+
+
+# Sisense date-dimension `level` -> ThoughtSpot search date keyword, emitted as its own
+# bracketed token next to the date column, e.g. "[Order Date] [monthly] [Revenue]" (H2).
+# BUCKET = continuous granularity (keeps a time series); PART = cyclic extraction
+# (e.g. day-of-week, for seasonality). Unmapped levels emit no token and flag PARTIAL.
 DATE_BUCKET_MAP: dict[str, str] = {
-    "hours": "hourly",
-    "days": "daily",
-    "weeks": "weekly",
-    "months": "monthly",
-    "quarters": "quarterly",
-    "years": "yearly",
+    "hours": "hourly", "days": "daily", "weeks": "weekly",
+    "months": "monthly", "quarters": "quarterly", "years": "yearly",
 }
-
 DATE_PART_MAP: dict[str, str] = {
-    "dayofweek": "day of week",
-    "daysofweek": "day of week",
-    "weekday": "day of week",
-    "dayofmonth": "day of month",
-    "dayinmonth": "day of month",
-    "dayofquarter": "day of quarter",
-    "dayofyear": "day of year",
-    "monthofyear": "month of year",
-    "monthsofyear": "month of year",
-    "weekofyear": "week of year",
-    "weeksofyear": "week of year",
-    "hourofday": "hour of day",
+    "dayofweek": "day of week", "daysofweek": "day of week", "weekday": "day of week",
+    "dayofmonth": "day of month", "dayinmonth": "day of month", "dayofquarter": "day of quarter",
+    "dayofyear": "day of year", "monthofyear": "month of year", "monthsofyear": "month of year",
+    "weekofyear": "week of year", "weeksofyear": "week of year", "hourofday": "hour of day",
 }
-
-
-def widget_chart_type(wtype: str) -> str | None:
-    return CHART_TYPE_MAP.get(wtype, DEFAULT_CHART_TYPE)
 
 
 def date_level_token(level: str | None) -> str | None:
-    """Sisense date `level` -> a bracketed TS search token ('[monthly]', '[day of week]'),
-    checking bucket granularities then cyclic date parts. None if unmapped."""
+    """Sisense date `level` -> a bracketed TS search token ('[monthly]', '[day of week]');
+    None if unmapped (caller flags PARTIAL)."""
     key = (level or "").lower()
     kw = DATE_BUCKET_MAP.get(key) or DATE_PART_MAP.get(key)
     return f"[{kw}]" if kw else None
 
 
-def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="COLUMN"):
+def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="COLUMN",
+               formulas=None, roles=None):
     """Build an Answer TML dict on a Model. `columns` are display names in order;
     a model measure with aggregation appears as 'Total <col>' (e.g. 'Total Revenue').
-    Mirrors the cluster's exported answer shape: both a table and a chart block."""
-    measures = [c for c in columns if c.startswith("Total ")]  # aggregated model measures
-    dims = [c for c in columns if c not in measures]
+    `roles` maps each display name to its source-panel axis role
+    ('x'|'y'|'color'|'size'|'grain'); when absent, fall back to the Total-prefix
+    heuristic (dims->x, measures->y). `formulas` are calculated measures
+    [{id,name,expr}] emitted in a TML formulas block and referenced by name. Mirrors
+    the cluster's exported answer shape: both a table and a chart block."""
+    formulas = formulas or []
+    fnames = {f["name"] for f in formulas}
+    if roles:                                         # panel-driven (faithful) axis roles
+        xs = [c for c in columns if roles.get(c) == "x"]
+        ys = [c for c in columns if roles.get(c) == "y"]
+        colors = [c for c in columns if roles.get(c) == "color"]
+        sizes = [c for c in columns if roles.get(c) == "size"]
+        grains = [c for c in columns if roles.get(c) == "grain"]
+    else:                                             # legacy heuristic: dims->x, measures->y
+        ys = [c for c in columns if c.startswith("Total ") or c in fnames]
+        xs = [c for c in columns if c not in ys]
+        colors, sizes, grains = [], [], []
     chart = {"type": chart_type, "chart_columns": [{"column_id": c} for c in columns],
              "client_state": "", "client_state_v2": ""}
-    if chart_type == "SCATTER" and measures:        # x/y are measures; first dim -> color
-        ax = {"x": measures[:1], "y": measures[1:2] or measures[:1]}
-        if dims:
-            ax["color"] = dims[:1]
-        chart["axis_configs"] = [ax]
+    ax = {}
+    if chart_type == "KPI":  # measure under y ONLY (bare x 400s without client_state_v2 axes)
+        ax = {"y": ys or columns}
+    elif chart_type in ("PIE", "DONUT") and len(columns) >= 2:
+        ax = {"x": xs[:1] or [columns[0]], "y": ys[:1] or [columns[-1]]}
+    elif chart_type == "ADVANCED_BUBBLE":   # x/y measures, slice=point dim, slice-with-color, size
+        slots = [("x-axis", xs[:1]), ("y-axis", ys[:1]), ("slice", grains[:1]),
+                 ("slice-with-color", colors[:1]), ("size", sizes[:1]), ("trellis-by", [])]
+        chart["custom_chart_config"] = [{"key": "basic", "dimensions": [
+            ({"key": k, "axes": [{"type": "FLAT", "column": c[0]}], "mode": "AXIS_DRIVEN"}
+             if c else {"key": k, "mode": "AXIS_DRIVEN"}) for k, c in slots]}]
+    elif chart_type == "SCATTER":           # x/y are measures; first dim -> color
+        if roles:
+            if xs: ax["x"] = xs[:1]
+            if ys: ax["y"] = ys[:1]
+        else:
+            ax = {"x": ys[:1], "y": ys[1:2] or ys[:1]}
+            if xs:
+                ax["color"] = xs[:1]
+        if colors:
+            ax["color"] = colors[:1]
     elif chart_type in ("COLUMN", "BAR", "LINE", "AREA", "STACKED_COLUMN", "STACKED_BAR") and len(columns) >= 2:
-        ax = {"x": dims[:1] or [columns[0]], "y": measures or [columns[-1]]}
-        if len(dims) > 1:                            # extra dimensions become series/color
-            ax["color"] = dims[1:]
+        ax = {"x": xs[:1] or [columns[0]], "y": ys or [columns[-1]]}
+        series = colors or (xs[1:] if not roles else [])   # break-by / extra dims -> series
+        if series:
+            ax["color"] = series
+    if ax:
         chart["axis_configs"] = [ax]
-    elif chart_type in ("PIE", "DONUT") and len(columns) >= 2:  # category x, measure y (TS-native pie shape)
-        chart["axis_configs"] = [{"x": dims[:1] or [columns[0]], "y": measures or [columns[-1]]}]
-    elif chart_type == "KPI":  # measure under y ONLY. The TS-native export's x+y needs the
-        # client_state_v2 axisProperties we don't emit; adding a bare x here 400s ("invalid axis").
-        chart["axis_configs"] = [{"y": measures or columns}]
-    return {
+    answer = {
         "name": name,
         "display_mode": "CHART_MODE",
         "tables": [{"id": model_name, "name": model_name, "fqn": model_fqn}],
@@ -119,6 +153,9 @@ def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="C
         },
         "chart": chart,
     }
+    if formulas:
+        answer["formulas"] = [{"id": f["id"], "name": f["name"], "expr": f["expr"]} for f in formulas]
+    return answer
 
 
 def liveboard_tml(name, answers):
@@ -129,6 +166,12 @@ def liveboard_tml(name, answers):
 
 _AGG_PREFIX = {"SUM": "Total ", "COUNT": "Total ", "COUNT_DISTINCT": "Unique Count ",
                "AVERAGE": "Average ", "MIN": "Min ", "MAX": "Max "}
+
+# Sisense JAQL agg -> ThoughtSpot formula function, used when an agg is applied to a column
+# the model exposes as an ATTRIBUTE (e.g. count of an ID) -> emit it as a calc measure.
+_AGG_FUNC = {"sum": "sum", "avg": "average", "average": "average", "count": "count",
+             "countduplicates": "count", "countdistinct": "unique count",
+             "min": "min", "max": "max"}
 
 
 def _model_col(dim: str) -> str:
@@ -161,49 +204,85 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
 
     answers = []
     for w in dash.widgets:
-        ct = widget_chart_type(w.wtype)
+        ct = widget_chart_type(w.wtype, w.subtype)
         if ct is None:
             _flag(report, w.title, f"widget type {w.wtype} has no chart equivalent")
-            continue
-        if any(f.formula for f in w.fields):
-            _flag(report, w.title, "calculated measure (needs translate_formula / B1)")
             continue
         if not w.fields:
             _flag(report, w.title, "no fields")
             continue
-        tokens, cols, seen, ok, level_note = [], [], set(), True, ""
+        tokens, cols, seen, formulas, roles, ok, reason, level_note = [], [], set(), [], {}, True, "", ""
+        cov = Coverage.AUTO
         for f in w.fields:
-            if f.panel == "filters":   # a filter, not a column to plot
+            role = _panel_role(f.panel)
+            if role is None:   # gauge min/max bounds, filters -> not a plotted column
+                continue
+            if f.formula:      # calculated measure -> translate JAQL to a TML formula
+                tr = translate_formula(f.formula)
+                if tr.coverage is Coverage.MANUAL:
+                    ok, reason = False, tr.note or "unsupported calculated measure"
+                    break
+                if "[" not in (tr.expr or ""):   # a bare constant (e.g. a gauge bound) -> not a column
+                    continue
+                fname = (f.title or "").strip() or f"Calc {len(formulas) + 1}"
+                if fname in seen:
+                    continue
+                seen.add(fname)
+                formulas.append({"id": f"formula_{len(formulas) + 1}", "name": fname, "expr": tr.expr})
+                tokens.append(f"[{fname}]")
+                cols.append(fname)
+                roles[fname] = role or "y"
+                if tr.coverage is Coverage.PARTIAL:
+                    cov = Coverage.PARTIAL
                 continue
             name = _model_col(f.dim)
-            if name in measures or f.agg:
-                disp = measures.get(name)
-            elif name in attrs:
+            if name not in measures and name not in attrs:   # Sisense date-hierarchy suffix:
+                base = name.split(" (")[0].strip()           # 'Date (Calendar)' -> 'Date'
+                if base in measures or base in attrs:
+                    name = base
+            if name in measures:                 # a model measure (its default agg applies)
+                disp = measures[name]
+            elif f.agg and name in attrs:        # agg on an attribute (e.g. count of an ID) -> calc measure
+                aggl = (f.agg or "").lower()
+                # Sisense count on a dimension is a DISTINCT count ("how many X") -> unique count.
+                fn = "unique count" if aggl.startswith("count") else _AGG_FUNC.get(aggl)
+                if not fn:
+                    ok, reason = False, f"unsupported aggregation '{f.agg}'"
+                    break
+                fname = (f.title or "").strip() or f"{f.agg.title()} {name}"
+                if fname in seen:
+                    continue
+                seen.add(fname)
+                formulas.append({"id": f"formula_{len(formulas) + 1}", "name": fname,
+                                 "expr": f"{fn}([{name}])"})
+                tokens.append(f"[{fname}]")
+                cols.append(fname)
+                roles[fname] = role or "y"
+                continue
+            elif name in attrs:                  # a plain dimension
                 disp = name
             else:
-                disp = None
-            if not disp:
-                ok = False
+                ok, reason = False, "a field maps to no model column (dropped ID / custom / unexposed)"
                 break
             if disp in seen:   # same dim used as category + break-by/filter -> keep once
                 continue
             seen.add(disp)
             tokens.append(f"[{name}]")
             cols.append(disp)
-            if f.level:   # date granularity/part -> a TS keyword token right after its column
+            roles[disp] = role or "x"
+            if f.level:   # date granularity/part (H2) -> a TS keyword token right after its column
                 tok = date_level_token(f.level)
                 if tok:
                     tokens.append(tok)
-                else:
-                    level_note = f"date level '{f.level}' has no TS keyword; emitted ungrouped"
+                elif cov is Coverage.AUTO:
+                    cov, level_note = Coverage.PARTIAL, f"date level '{f.level}' has no TS keyword; emitted ungrouped"
         if not ok or not cols:
-            _flag(report, w.title, "a field maps to no model column (dropped ID / custom / unexposed)")
+            _flag(report, w.title, reason or "no mappable fields")
             continue
-        answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(tokens), cols, ct))
+        answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(tokens), cols, ct,
+                                  formulas=formulas, roles=roles))
         if report:
-            if level_note:
-                report.add("widget", w.title, Coverage.PARTIAL, level_note)
-            else:
-                report.add("widget", w.title, Coverage.AUTO, ct)
+            note = ct + (" + formula" if formulas else "") + (f"; {level_note}" if level_note else "")
+            report.add("widget", w.title, cov, note)
 
     return {"answers": answers, "liveboard": liveboard_tml(dash.title or model_name, answers)}

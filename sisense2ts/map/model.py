@@ -101,12 +101,13 @@ def model_to_tml(model: SourceModel, connection_name: str, connection_fqn: str,
             tbl["joins_with"] = joins_with[t.id]
         tables.append({"table": tbl})
 
-    # Model columns: curated (skip join-key IDs, dedupe by display name).
+    # Model columns: dedupe by display name. IDs are kept (exposed as attributes) so
+    # count-style KPIs over a key (e.g. "Total Brands" = unique count of Brand ID) resolve.
     seen: set = set()
     mcols = []
     for t in model.tables:
         for c in t.columns:
-            if _is_id(c.name) or c.name in seen:
+            if c.name in seen:
                 continue
             seen.add(c.name)
             ctype, agg = _role(c)

@@ -100,3 +100,51 @@ candidate fixes (all verified against the native export, none applied yet):
 
 Treat the fixture as the source of truth for a type's shape; treat our current
 `answer_tml` output as the thing to reconcile toward it.
+
+## Panel-driven axes + faithful chart types (✅ live-validated 2026-06-25, 9/9)
+
+`dashboard_to_tml` assigns axes from the **source JAQL panel**, not by guessing,
+so every column lands where Sisense put it. `_PANEL_ROLE` maps panel name → role:
+
+| Sisense panel | role | axis |
+|---|---|---|
+| `categories`, `x-axis`, `rows` | x | x |
+| `values`, `y-axis`, `value` | y | y (multiple measures ok) |
+| `break by`, `break by / color`, `color` | color | series / stack |
+| `size` | size | bubble size |
+| `point` | grain | bubble `slice` (a column, not a normal axis) |
+| `min`, `max`, `filters` | None | skipped (gauge bounds, filters) |
+
+`answer_tml(..., roles=)` builds `axis_configs` from those roles; unknown panels
+default by field kind (measure→y, dim→x). Chart-type rules:
+
+- **BUBBLE → `ADVANCED_BUBBLE`** (NOT `SCATTER`/`BUBBLE`). It uses a
+  `custom_chart_config` block, not `axis_configs`:
+  ```yaml
+  custom_chart_config:
+  - key: basic
+    dimensions:
+    - {key: x-axis,           axes: [{type: FLAT, column: <measure>}], mode: AXIS_DRIVEN}
+    - {key: y-axis,           axes: [{type: FLAT, column: <measure>}], mode: AXIS_DRIVEN}
+    - {key: slice,            axes: [{type: FLAT, column: <point dim>}], mode: AXIS_DRIVEN}
+    - {key: slice-with-color, axes: [{type: FLAT, column: <break-by dim>}], mode: AXIS_DRIVEN}
+    - {key: size,             axes: [{type: FLAT, column: <measure>}], mode: AXIS_DRIVEN}
+    - {key: trellis-by, mode: AXIS_DRIVEN}
+  ```
+  The source `point` panel dim goes in `slice` (it was being dropped). Templated
+  off the user's saved correct answer (export the real TML and template, per the
+  standing method).
+- **Stacked**: subtype containing `stacked` → `STACKED_BAR` / `STACKED_COLUMN`;
+  the break-by dim becomes `color` (the stack).
+- **Combo (Revenue vs Units)**: multiple `values` measures → both on `y` (LINE).
+  A true bars-plus-line dual-axis (`LINE_COLUMN` + secondary axis) is still polish.
+- **Count-of-ID KPIs** (e.g. "Total Brands" = count of Brand ID): the model now
+  EXPOSES ID columns (`model.py` no longer drops `_is_id` columns), and an agg on
+  an attribute emits a calc measure; a count-family agg becomes `unique count([ID])`
+  (Sisense count-on-a-dimension is a DISTINCT count). So Total Brands =
+  `unique count([Brand ID])`, Total Sales = `unique count([Visit ID])`.
+- **Date-hierarchy suffix**: a dim like `Date (Calendar)` is matched against the
+  model by stripping the ` (...)` suffix → `Date`.
+
+Gotcha when templating: exporting a Liveboard's TML returns YAML whose bare `=`
+(`oper: =`) trips PyYAML — read the `edoc` as text rather than `yaml.safe_load`.
