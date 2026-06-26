@@ -157,10 +157,56 @@ def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="C
     return answer
 
 
-def liveboard_tml(name, answers):
-    """Wrap a list of Answer dicts into a Liveboard TML dict."""
+def liveboard_tml(name, answers, layout=None):
+    """Wrap a list of Answer dicts into a Liveboard TML dict; `layout` (a list of tile
+    dicts) is emitted as the Liveboard's `layout.tiles` when present."""
     viz = [{"id": f"Viz_{i+1}", "answer": a} for i, a in enumerate(answers)]
-    return {"liveboard": {"name": name, "visualizations": viz}}
+    lb = {"name": name, "visualizations": viz}
+    if layout:
+        lb["layout"] = {"tiles": layout}
+    return {"liveboard": lb}
+
+
+def _alloc(weights, total):
+    """Split `total` integer units across `weights` proportionally (largest-remainder),
+    summing to exactly `total`."""
+    s = sum(weights) or 1
+    raw = [w / s * total for w in weights]
+    out = [int(x) for x in raw]
+    for i in sorted(range(len(weights)), key=lambda i: raw[i] - out[i], reverse=True)[:total - sum(out)]:
+        out[i] += 1
+    return [max(1, x) for x in out]
+
+
+def liveboard_layout(tiles, viz_by_widget, grid_cols=12, px_per_row=46):
+    """Sisense TilePositions -> Liveboard layout.tiles on a `grid_cols`-wide grid. Faithful:
+    columns keep their proportional widths (largest-remainder to `grid_cols`), cells stack
+    top-to-bottom, subcells sit side by side; px heights -> grid rows via `px_per_row`."""
+    if not tiles:
+        return []
+    col_w = {}
+    for t in tiles:
+        col_w.setdefault(t.col, t.col_width_pct or 1.0)
+    cols = sorted(col_w)
+    spans = _alloc([col_w[c] for c in cols], grid_cols)
+    col_x, x = {}, 0
+    for c, sp in zip(cols, spans):
+        col_x[c] = (x, sp); x += sp
+    out = []
+    for c in cols:
+        x0, span = col_x[c]
+        y = 0
+        for r in sorted({t.row for t in tiles if t.col == c}):
+            cell = [t for t in tiles if t.col == c and t.row == r]
+            h = max(max(1, round(t.height / px_per_row)) for t in cell)
+            cx = x0
+            for t, sw in zip(cell, _alloc([t.width_pct or 1.0 for t in cell], span)):
+                if viz_by_widget.get(t.widget_oid):
+                    out.append({"visualization_id": viz_by_widget[t.widget_oid],
+                                "x": cx, "y": y, "width": sw, "height": h})
+                cx += sw
+            y += h
+    return out
 
 
 _AGG_PREFIX = {"SUM": "Total ", "COUNT": "Total ", "COUNT_DISTINCT": "Unique Count ",
@@ -240,7 +286,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
     measures = {c["name"]: _AGG_PREFIX.get((c.get("properties") or {}).get("aggregation", "SUM"), "Total ") + c["name"]
                 for c in model_columns if (c.get("properties") or {}).get("column_type") == "MEASURE"}
 
-    answers = []
+    answers, answer_widgets = [], []
     for w in dash.widgets:
         ct = widget_chart_type(w.wtype, w.subtype)
         if ct is None:
@@ -332,8 +378,12 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                 cov, level_note = Coverage.PARTIAL, fnote
         answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(tokens), cols, ct,
                                   formulas=formulas, roles=roles, formats=formats))
+        answer_widgets.append(w.oid)
         if report:
             note = ct + (" + formula" if formulas else "") + (f"; {level_note}" if level_note else "")
             report.add("widget", w.title, cov, note)
 
-    return {"answers": answers, "liveboard": liveboard_tml(dash.title or model_name, answers)}
+    viz_by_widget = {oid: f"Viz_{i + 1}" for i, oid in enumerate(answer_widgets)}
+    layout = liveboard_layout(dash.layout, viz_by_widget)
+    return {"answers": answers,
+            "liveboard": liveboard_tml(dash.title or model_name, answers, layout)}

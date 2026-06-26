@@ -179,13 +179,14 @@ def _num(v) -> float:
 def _parse_layout(layout: dict) -> list[TilePosition]:
     tiles: list[TilePosition] = []
     for ci, col in enumerate(layout.get("columns", []) or []):
+        col_w = _num(col.get("width"))
         for ri, cell in enumerate(col.get("cells", []) or []):
             for sub in cell.get("subcells", []) or []:
                 width = _num(sub.get("width"))
                 for el in sub.get("elements", []) or []:
                     if el.get("widgetid"):
                         tiles.append(TilePosition(widget_oid=el["widgetid"], height=int(_num(el.get("height"))),
-                                                  width_pct=width, row=ri, col=ci))
+                                                  width_pct=width, row=ri, col=ci, col_width_pct=col_w))
     return tiles
 
 

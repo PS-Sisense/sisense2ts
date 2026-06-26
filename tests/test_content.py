@@ -8,8 +8,15 @@ from sisense2ts.ir.models import (
     FieldKind,
     SourceDashboard,
     SourceWidget,
+    TilePosition,
 )
-from sisense2ts.map.content import _format_pattern, answer_tml, dashboard_to_tml, date_bucket_suffix
+from sisense2ts.map.content import (
+    _format_pattern,
+    answer_tml,
+    dashboard_to_tml,
+    date_bucket_suffix,
+    liveboard_layout,
+)
 from sisense2ts.map.model import model_to_tml
 
 
@@ -74,6 +81,21 @@ def test_date_bucket_suffix():
     assert date_bucket_suffix("dayofweek") is None
     assert date_bucket_suffix("fortnight") is None
     assert date_bucket_suffix(None) is None
+
+
+def test_liveboard_layout_faithful_grid():
+    # two equal columns: left has one full-width tile; right stacks a cell of two side-by-side.
+    tiles = [
+        TilePosition(widget_oid="a", col=0, row=0, col_width_pct=50, width_pct=100, height=184),
+        TilePosition(widget_oid="b", col=1, row=0, col_width_pct=50, width_pct=50, height=384),
+        TilePosition(widget_oid="c", col=1, row=0, col_width_pct=50, width_pct=50, height=384),
+    ]
+    out = liveboard_layout(tiles, {"a": "Viz_1", "b": "Viz_2", "c": "Viz_3"})
+    by = {t["visualization_id"]: t for t in out}
+    assert by["Viz_1"]["x"] == 0 and by["Viz_1"]["width"] == 6      # left column, full width
+    assert by["Viz_2"]["x"] == 6 and by["Viz_3"]["x"] == 9          # right column, split side by side
+    assert by["Viz_2"]["width"] == 3 and by["Viz_3"]["width"] == 3
+    assert by["Viz_1"]["height"] == 4 and by["Viz_2"]["height"] == 8  # px -> rows
 
 
 def test_format_pattern_maps_currency_percent_number():

@@ -150,9 +150,10 @@ class TilePosition:
     """Where a widget sits on the dashboard grid (Sisense layout column/cell/subcell)."""
     widget_oid: str
     height: int = 0
-    width_pct: float = 0.0
+    width_pct: float = 0.0           # subcell width as a % of its column
     row: int = 0
     col: int = 0
+    col_width_pct: float = 0.0       # the column's own width as a % of the dashboard
 
 
 @dataclass
