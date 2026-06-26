@@ -33,3 +33,10 @@ def test_parse_dashboard(raw_dashboard):
 
     # layout produced tiles
     assert d.layout
+
+
+def test_parse_captures_date_level(raw_dashboard_rich):
+    # the "Revenue Trend" line widget buckets Order Date by month (JAQL `level`)
+    d = parse.parse_dashboard(raw_dashboard_rich)
+    levels = {f.level for w in d.widgets for f in w.fields if f.level}
+    assert "months" in levels
