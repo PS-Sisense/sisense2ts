@@ -9,7 +9,7 @@ from sisense2ts.ir.models import (
     SourceDashboard,
     SourceWidget,
 )
-from sisense2ts.map.content import dashboard_to_tml, date_bucket_suffix
+from sisense2ts.map.content import _format_pattern, answer_tml, dashboard_to_tml, date_bucket_suffix
 from sisense2ts.map.model import model_to_tml
 
 
@@ -74,6 +74,22 @@ def test_date_bucket_suffix():
     assert date_bucket_suffix("dayofweek") is None
     assert date_bucket_suffix("fortnight") is None
     assert date_bucket_suffix(None) is None
+
+
+def test_format_pattern_maps_currency_percent_number():
+    # Sisense format mask -> TML format_pattern; high-value cases carry, default -> None.
+    assert _format_pattern({"mask": {"currency": {"symbol": "$"}, "decimals": 2}}) == "$#,##0.00"
+    assert _format_pattern({"mask": {"percent": True, "decimals": 1}}) == "0.0%"
+    assert _format_pattern({"mask": {"type": "number", "separated": True, "decimals": "auto"}}) == "#,##0"
+    assert _format_pattern({"mask": {"isdefault": True}}) is None    # plain default
+    assert _format_pattern({"mask": {"years": "yyyy"}}) is None       # date mask (not mapped yet)
+    assert _format_pattern({}) is None
+
+
+def test_answer_tml_emits_format_pattern():
+    a = answer_tml("k", "M", "fqn", "[Revenue]", ["Total Revenue"], "KPI",
+                   formats={"Total Revenue": "$#,##0.00"})
+    assert a["table"]["table_columns"][0]["format_pattern"] == "$#,##0.00"
 
 
 def test_date_part_is_partial():

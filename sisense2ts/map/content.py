@@ -86,7 +86,7 @@ def date_bucket_suffix(level: str | None) -> str | None:
 
 
 def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="COLUMN",
-               formulas=None, roles=None):
+               formulas=None, roles=None, formats=None):
     """Build an Answer TML dict on a Model. `columns` are display names in order;
     a model measure with aggregation appears as 'Total <col>' (e.g. 'Total Revenue').
     `roles` maps each display name to its source-panel axis role
@@ -143,7 +143,10 @@ def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="C
         "search_query": search_query,
         "answer_columns": [{"name": c} for c in columns],
         "table": {
-            "table_columns": [{"column_id": c} for c in columns],
+            "table_columns": [
+                {"column_id": c, **({"format_pattern": (formats or {})[c]} if (formats or {}).get(c) else {})}
+                for c in columns
+            ],
             "ordered_column_ids": list(columns),
             "client_state": "", "client_state_v2": "",
         },
@@ -201,6 +204,25 @@ def _filter_token(sf, attrs, measures):
     return "", ""
 
 
+def _format_pattern(fmt: dict) -> str | None:
+    """Sisense format block -> a ThoughtSpot column format_pattern, or None for the default.
+    Carries currency / percent (the high-value cases) and grouped numbers; per-level date
+    masks aren't mapped yet."""
+    mask = (fmt or {}).get("mask") or {}
+    if not mask or mask.get("years") or mask.get("days"):   # empty or a date mask -> skip
+        return None
+    cur, pct, dec = mask.get("currency"), mask.get("percent"), mask.get("decimals")
+    frac = "." + "0" * int(dec) if str(dec).isdigit() and int(dec) > 0 else ""
+    if cur:
+        sym = cur.get("symbol", "$") if isinstance(cur, dict) else "$"
+        return f"{sym}#,##0{frac or '.00'}"
+    if pct:
+        return f"0{frac or '.00'}%"
+    if mask.get("type") == "number" or mask.get("separated"):
+        return ("#,##0" if mask.get("separated", True) else "0") + frac
+    return None
+
+
 def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                      model_columns: list, report: CoverageReport | None = None) -> dict:
     """IR dashboard -> {"answers": [<Answer TML>...], "liveboard": <Liveboard TML>}.
@@ -227,7 +249,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
         if not w.fields:
             _flag(report, w.title, "no fields")
             continue
-        tokens, cols, seen, formulas, roles, ok, reason, level_note = [], [], set(), [], {}, True, "", ""
+        tokens, cols, seen, formulas, roles, formats, ok, reason, level_note = [], [], set(), [], {}, {}, True, "", ""
         cov = Coverage.AUTO
         for f in w.fields:
             role = _panel_role(f.panel)
@@ -248,6 +270,8 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                 tokens.append(f"[{fname}]")
                 cols.append(fname)
                 roles[fname] = role or "y"
+                if (fp := _format_pattern(f.fmt)):
+                    formats[fname] = fp
                 if tr.coverage is Coverage.PARTIAL:
                     cov = Coverage.PARTIAL
                 continue
@@ -274,6 +298,8 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                 tokens.append(f"[{fname}]")
                 cols.append(fname)
                 roles[fname] = role or "y"
+                if (fp := _format_pattern(f.fmt)):
+                    formats[fname] = fp
                 continue
             elif name in attrs:                  # a plain dimension
                 disp = name
@@ -293,6 +319,8 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
             tokens.append(col_tok)
             cols.append(disp)
             roles[disp] = role or "x"
+            if (fp := _format_pattern(f.fmt)):
+                formats[disp] = fp
         if not ok or not cols:
             _flag(report, w.title, reason or "no mappable fields")
             continue
@@ -303,7 +331,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
             elif fnote and cov is Coverage.AUTO:
                 cov, level_note = Coverage.PARTIAL, fnote
         answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(tokens), cols, ct,
-                                  formulas=formulas, roles=roles))
+                                  formulas=formulas, roles=roles, formats=formats))
         if report:
             note = ct + (" + formula" if formulas else "") + (f"; {level_note}" if level_note else "")
             report.add("widget", w.title, cov, note)
