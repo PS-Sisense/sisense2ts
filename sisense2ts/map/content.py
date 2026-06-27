@@ -296,7 +296,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
             _flag(report, w.title, "no fields")
             continue
         tokens, cols, seen, formulas, roles, formats, ok, reason, level_note = [], [], set(), [], {}, {}, True, "", ""
-        cov = Coverage.AUTO
+        cov, n_dims = Coverage.AUTO, 0   # n_dims = plotted dimension columns (drives top-N applicability)
         for f in w.fields:
             role = _panel_role(f.panel)
             if role is None:   # gauge min/max bounds, filters -> not a plotted column
@@ -326,6 +326,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                 base = name.split(" (")[0].strip()           # 'Date (Calendar)' -> 'Date'
                 if base in measures or base in attrs:
                     name = base
+            is_dim = False
             if name in measures:                 # a model measure (its default agg applies)
                 disp = measures[name]
             elif f.agg and name in attrs:        # agg on an attribute (e.g. count of an ID) -> calc measure
@@ -348,7 +349,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                     formats[fname] = fp
                 continue
             elif name in attrs:                  # a plain dimension
-                disp = name
+                disp, is_dim = name, True
             else:
                 ok, reason = False, "a field maps to no model column (dropped ID / custom / unexposed)"
                 break
@@ -365,6 +366,8 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
             tokens.append(col_tok)
             cols.append(disp)
             roles[disp] = role or "x"
+            if is_dim:
+                n_dims += 1
             if (fp := _format_pattern(f.fmt)):
                 formats[disp] = fp
         if not ok or not cols:
@@ -383,7 +386,12 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                 tokens.append(ftok)
             elif fnote and cov is Coverage.AUTO:
                 cov, level_note = Coverage.PARTIAL, fnote
-        search_tokens = ([f"top {top_n}"] if top_n else []) + tokens   # "top 3 [Revenue] [Category] ..."
+        if top_n and n_dims == 1:                       # "top N" caps total rows, so it is faithful only
+            search_tokens = [f"top {top_n}"] + tokens   # for a single ranked dimension (top 3 categories)
+        else:
+            search_tokens = tokens
+            if top_n and cov is Coverage.AUTO:          # multi-dim: ranking one dimension isn't expressible
+                cov, level_note = Coverage.PARTIAL, f"top-N not applied (ranks 1 of {n_dims} dims; search caps rows)"
         answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(search_tokens), cols, ct,
                                   formulas=formulas, roles=roles, formats=formats))
         answer_widgets.append(w.oid)
