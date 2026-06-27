@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import ssl
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional
@@ -142,12 +143,26 @@ def databricks_rows(dbx: dict, sql: str) -> list:
     return (r.get("result") or {}).get("data_array") or []
 
 
-def sisense_rows(base_url: str, token: str, datasource: str, jaql: dict) -> list:
-    """A — run JAQL against Sisense; return its aggregated rows ([dim,] value)."""
-    resp = _post(base_url.rstrip("/") + f"/api/datasources/{datasource}/jaql", jaql,
-                 {"Authorization": "Bearer " + token})
-    return [list(row.values()) if isinstance(row, dict) else row
-            for row in (resp.get("values") or resp.get("data") or [])]
+def sisense_rows(base_url: str, token: str, datasource, jaql) -> list:
+    """A — run JAQL against Sisense; return aggregated rows ([dim,] value).
+
+    `datasource` is the Sisense datasource object ({title, ...}); `jaql` is the metadata
+    list (one `{jaql: {...}}` per dimension/measure). The response `values` is a list of
+    {data, text} cells for a scalar metric, or a list of rows (each a list of such cells);
+    we extract `.data` from each cell into plain [[dim,] value] rows."""
+    title = datasource.get("title") if isinstance(datasource, dict) else str(datasource)
+    url = base_url.rstrip("/") + "/api/datasources/" + urllib.parse.quote(title) + "/jaql"
+    metadata = jaql if isinstance(jaql, list) else (jaql or {}).get("metadata", [])
+    resp = _post(url, {"datasource": datasource, "metadata": metadata}, {"Authorization": "Bearer " + token})
+    out = []
+    for v in resp.get("values") or []:
+        if isinstance(v, list):
+            out.append([c.get("data") if isinstance(c, dict) else c for c in v])
+        elif isinstance(v, dict):
+            out.append([v.get("data")])
+        else:
+            out.append([v])
+    return out
 
 
 # --------------------------------------------------------------------------- #

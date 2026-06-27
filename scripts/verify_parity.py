@@ -17,32 +17,51 @@ import urllib.request
 
 import yaml
 
+from sisense2ts.extract.sisense_client import SisenseClient
 from sisense2ts.load import ts_client
 from sisense2ts.verify import parity
 
 CTX = ssl._create_unverified_context()
 MODEL_NAME = "Sample ECommerce (Sisense)"
 
-# Ground-truth SQL runs with catalog+schema already set (workspace.sisense_demo),
-# so table names are unqualified. Each check pairs a ThoughtSpot search query with
-# the equivalent warehouse aggregate.
+
+def _m(*items):
+    """Build a Sisense JAQL `metadata` list from (dim[, agg]) tuples."""
+    md = []
+    for dim, *agg in items:
+        j = {"dim": dim, "title": dim.strip("[]").split(".")[-1]}
+        if agg:
+            j["agg"] = agg[0]
+        md.append({"jaql": j})
+    return md
+
+
+# Each check pairs a ThoughtSpot search query (B), the equivalent warehouse SQL (C, runs
+# with catalog+schema already set), and the source Sisense JAQL metadata (A, the 3rd leg).
 CHECKS = [
-    parity.ParityCheck("Total Revenue", "[Revenue]", "SELECT sum(Revenue) FROM Commerce", dims=0),
-    parity.ParityCheck("Total Quantity", "[Quantity]", "SELECT sum(Quantity) FROM Commerce", dims=0),
-    parity.ParityCheck("Total Cost", "[Cost]", "SELECT sum(Cost) FROM Commerce", dims=0),
+    parity.ParityCheck("Total Revenue", "[Revenue]", "SELECT sum(Revenue) FROM Commerce", dims=0,
+                       jaql=_m(("[Commerce.Revenue]", "sum"))),
+    parity.ParityCheck("Total Quantity", "[Quantity]", "SELECT sum(Quantity) FROM Commerce", dims=0,
+                       jaql=_m(("[Commerce.Quantity]", "sum"))),
+    parity.ParityCheck("Total Cost", "[Cost]", "SELECT sum(Cost) FROM Commerce", dims=0,
+                       jaql=_m(("[Commerce.Cost]", "sum"))),
     parity.ParityCheck("Revenue by Category", "[Category] [Revenue]",
                        "SELECT c.Category, sum(m.Revenue) FROM Commerce m "
-                       "JOIN Category c ON m.Category_ID=c.Category_ID GROUP BY c.Category", dims=1),
+                       "JOIN Category c ON m.Category_ID=c.Category_ID GROUP BY c.Category", dims=1,
+                       jaql=_m(("[Category.Category]",), ("[Commerce.Revenue]", "sum"))),
     parity.ParityCheck("Revenue by Country", "[Country] [Revenue]",
                        "SELECT c.Country, sum(m.Revenue) FROM Commerce m "
-                       "JOIN Country c ON m.Country_ID=c.Country_ID GROUP BY c.Country", dims=1),
+                       "JOIN Country c ON m.Country_ID=c.Country_ID GROUP BY c.Country", dims=1,
+                       jaql=_m(("[country.Country]",), ("[Commerce.Revenue]", "sum"))),
     parity.ParityCheck("Revenue by Brand", "[Brand] [Revenue]",
                        "SELECT b.Brand, sum(m.Revenue) FROM Commerce m "
                        "JOIN Brand b ON m.Brand_ID=b.Brand_ID GROUP BY b.Brand", dims=1),
     parity.ParityCheck("Revenue by Gender", "[Gender] [Revenue]",
-                       "SELECT Gender, sum(Revenue) FROM Commerce GROUP BY Gender", dims=1),
+                       "SELECT Gender, sum(Revenue) FROM Commerce GROUP BY Gender", dims=1,
+                       jaql=_m(("[Commerce.Gender]",), ("[Commerce.Revenue]", "sum"))),
     parity.ParityCheck("Units Sold by Age Range", "[Age Range] [Quantity]",
-                       "SELECT Age_Range, sum(Quantity) FROM Commerce GROUP BY Age_Range", dims=1),
+                       "SELECT Age_Range, sum(Quantity) FROM Commerce GROUP BY Age_Range", dims=1,
+                       jaql=_m(("[Commerce.Age Range]",), ("[Commerce.Quantity]", "sum"))),
 ]
 
 
@@ -72,12 +91,22 @@ def main():
     ts = {"base_url": T["base_url"], "token": token, "model_id": model_id}
     print(f"model {MODEL_NAME!r} -> {model_id}")
 
-    # Sisense leg only if both a token and a datasource id are configured.
+    # Sisense leg (A): fetch the ECommerce dashboard's datasource object, then JAQL against it.
     sisense = None
-    if S.get("token") and S.get("datasource"):
-        sisense = {"base_url": S["base_url"], "token": S["token"], "datasource": S["datasource"]}
-    else:
-        print("sisense leg: skipped (no live source token + datasource in config)\n")
+    if S.get("token"):
+        try:
+            sc = SisenseClient(S["base_url"], S["token"])
+            dl = sc.list_dashboards()
+            dl = dl if isinstance(dl, list) else (dl or {}).get("dashboards", [])
+            dd = next((x for x in dl if "ecommerce" in (x.get("title", "") or "").lower()), None)
+            ds_obj = (dd or {}).get("datasource")
+            if ds_obj:
+                sisense = {"base_url": S["base_url"], "token": S["token"], "datasource": ds_obj}
+                print(f"sisense leg: ON (datasource {ds_obj.get('title')!r})")
+        except Exception as e:
+            print(f"sisense leg: unavailable ({e})")
+    if not sisense:
+        print("sisense leg: skipped (no live source token)\n")
 
     results = [parity.run_check(c, ts=ts, dbx=D, sisense=sisense) for c in CHECKS]
     print(parity.render(results))
