@@ -99,6 +99,39 @@ def test_top_n_filter_prepends_keyword():
     assert all(it.coverage is not Coverage.PARTIAL for it in rep.items)
 
 
+# A two-dimension top-N widget mirroring "TOP 3 CATEGORIES BY REVENUE AND AGE": Age Range on
+# the bar axis, Revenue as the value, Category as the break-by, with a top-3 rank FILTER on
+# Category by Revenue. This is the case search `top N` gets wrong (it caps total rows, not the
+# ranked dimension), so it must resolve members and keep the ranked column.
+def _topn_multidim_widget():
+    return SourceWidget(
+        oid="1", title="TOP 3 CATEGORIES BY REVENUE AND AGE", wtype="chart/bar", subtype="bar/stacked",
+        fields=[Field(kind=FieldKind.DIMENSION, dim="[Commerce.Age Range]", panel="categories"),
+                Field(kind=FieldKind.MEASURE, dim="[Commerce.Revenue]", agg="sum", panel="values"),
+                Field(kind=FieldKind.DIMENSION, dim="[Category.Category]", panel="break by")],
+        filters=[SourceFilter(FilterKind.TOP_N, "[Category.Category]", "top", [3],
+                              raw={"top": 3, "by": {"dim": "[Commerce.Revenue]", "agg": "sum",
+                                                    "title": "Total Revenue"}})])
+
+
+_TOPN_MCOLS = [{"name": "Age Range", "properties": {"column_type": "ATTRIBUTE"}},
+               {"name": "Category", "properties": {"column_type": "ATTRIBUTE"}},
+               {"name": "Revenue", "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]
+
+
+def test_top_n_multidim_emits_subquery_keeping_ranked_column():
+    # the ranked dim (Category) plotted alongside Age Range -> a subquery filter that ranks
+    # Category globally by Revenue while KEEPING [Category] in the chart (so Age Range keeps its
+    # full breakdown). Dynamic (re-ranks live), AUTO, and not a row cap. Live-validated grammar.
+    rep = CoverageReport()
+    out = dashboard_to_tml(SourceDashboard(oid="d", title="D", widgets=[_topn_multidim_widget()]),
+                           "M", "fqn", _TOPN_MCOLS, rep)
+    q = out["answers"][0]["search_query"]
+    assert not q.startswith("top 3")                               # not a row cap
+    assert "[Category] in ( [Category] top 3 [Category] sort by [Revenue] )" in q
+    assert all(it.coverage is Coverage.AUTO for it in rep.items)   # no snapshot, no PARTIAL
+
+
 def test_liveboard_layout_faithful_grid():
     # two equal columns: left has one full-width tile; right stacks a cell of two side-by-side.
     tiles = [

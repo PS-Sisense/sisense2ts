@@ -48,40 +48,69 @@ A JAQL date dimension item looks like
 `{ "jaql": { "dim": "[Commerce.Date]", "level": "months" } }`. The `level` is the
 time grain the widget plots by. The IR `Field` now carries it
 (`level: Optional[str]`, additive — set in `parse._jaql_to_field`), and
-`map/content.py` emits the matching **ThoughtSpot date keyword** as its own bracketed
-token right after the date column in the search query. Two flavours:
+`map/content.py` (`date_bucket_suffix`) emits the grain as a **suffix attached to the
+date column token**, NOT a standalone keyword.
 
 **Bucket** — continuous granularity, keeps chronology (a time series). `DATE_BUCKET_MAP`:
 
-| Sisense `level` | TS token | so "Revenue Trend" emits |
+| Sisense `level` | TS column suffix | so "Revenue Trend" emits |
 |---|---|---|
-| `days` | `[daily]` | `[Order Date] [daily] [Revenue]` |
-| `weeks` | `[weekly]` | … |
-| `months` | `[monthly]` | `[Order Date] [monthly] [Revenue]` (was `[Order Date] [Revenue]`) |
-| `quarters` | `[quarterly]` | … |
-| `years` | `[yearly]` | … |
-| `hours` | `[hourly]` | (DateTime only) |
+| `days` | `.DAILY` | `[Order Date].DAILY [Revenue]` |
+| `weeks` | `.WEEKLY` | … |
+| `months` | `.MONTHLY` | `[Order Date].MONTHLY [Revenue]` (was `[Order Date] [Revenue]`) |
+| `quarters` | `.QUARTERLY` | … |
+| `years` | `.YEARLY` | … |
+| `hours` | `.HOURLY` | (DateTime only) |
 
-**Date part** — cyclic extraction, collapses across periods (all Januaries together)
-for seasonality. `DATE_PART_MAP`:
+⚠️ **Live-validated:** the suffix attaches to the column (`[Order Date].MONTHLY`). A
+standalone `[monthly]` token is read as a missing column and **400s** — do not emit it.
 
-| Sisense `level` (+ aliases) | TS token |
-|---|---|
-| `dayofweek` / `weekday` | `[day of week]` |
-| `dayofmonth` / `dayinmonth` | `[day of month]` |
-| `dayofquarter` | `[day of quarter]` |
-| `dayofyear` | `[day of year]` |
-| `monthofyear` | `[month of year]` |
-| `weekofyear` | `[week of year]` |
-| `hourofday` | `[hour of day]` |
+**Date part** — cyclic extraction (day-of-week, month-of-year, etc., in
+`DATE_PART_LEVELS`) collapses across periods for seasonality. Its ThoughtSpot search
+syntax is **not yet verified**, so these levels emit no suffix and the widget is flagged
+**PARTIAL** ("date level not applied (cyclic part / unmapped)") — never guessed at.
 
-The keyword is a **search modifier**, not an extra answer column. A level with no
-mapping (e.g. an unrecognised spelling) emits no token and the widget is flagged
-**PARTIAL** ("emitted ungrouped"), never silently dropped or faked. Sisense `level`
-spellings vary by version, so common aliases are included — confirm the exact strings
-against real exports. Keywords confirmed against the
+The suffix is a **search modifier**, not an extra answer column. Any unmapped level
+(unrecognised spelling, or a cyclic part) emits no suffix and is flagged PARTIAL, never
+silently dropped or faked. Sisense `level` spellings vary by version — confirm exact
+strings against real exports. Buckets confirmed against the
 [Keyword reference](https://docs.thoughtspot.com/cloud/26.6.0.cl/keywords) and
 [Time series analysis](https://docs.thoughtspot.com/cloud/latest/search-time) docs.
+
+## Filters carry a per-attribute top-N rank — subquery filter ✅ implemented
+
+A JAQL filter can rank one attribute by a measure:
+`{ "dim": "[Category.Category]", "filter": { "top": 3, "by": { "dim": "[Commerce.Revenue]", "agg": "sum" } } }`
+— i.e. "keep the **top 3 Categories by Revenue**", then chart the rest normally (e.g.
+Revenue by Age Range, stacked by Category). The IR captures it as
+`SourceFilter(TOP_N, dim, values=[n], raw={top, by})`.
+
+⚠️ **Plain search `top N` is a ROW cap, not a per-attribute rank.** Every variant
+(`top 3 [Revenue] [Category] [Age Range]`, ranked dim first, trailing, NL) returns 3 total
+rows — empirically verified. It is faithful ONLY when the ranked attribute is the **single**
+plotted dimension.
+
+`dashboard_to_tml` (pure, no network) emits the rank in two tiers:
+
+| Case | Output | Coverage |
+|---|---|---|
+| Single plotted dim | leading `top N` (the row cap = exactly the top-N members) | AUTO |
+| Ranked dim is one of ≥2 plotted dims | a **subquery filter** (below) | AUTO |
+| Ranked column / rank measure didn't map | not applied | PARTIAL |
+
+For the multi-dim case, the faithful, **dynamic** form is a subquery that ranks the attribute
+globally and keeps it as a plotted column so the other dimensions retain their full breakdown:
+
+```
+[Age Range] [Revenue] [Category] [Category] in ( [Category] top 3 [Category] sort by [Revenue] )
+```
+
+Live-validated: this returns exactly the global top-3 Categories by Revenue
+(Electronics/Home/Apparel) across all Age Ranges, and re-ranks with the data (no convert-time
+snapshot, no resolver). It beats the earlier approaches that all fail here: plain `top N` caps
+rows; `[Category] = '…'` and `[Category] in '…'` drop the column (killing the stack/break-by);
+`top N by [m] for each [dim]` is a *windowed* (per-group) rank, a different analytic than a
+global dimension filter. Requires ThoughtSpot's in-subquery search (modern clusters).
 
 ## Where formulas get flagged in the pipeline
 

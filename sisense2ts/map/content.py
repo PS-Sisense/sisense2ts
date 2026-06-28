@@ -40,7 +40,7 @@ def widget_chart_type(wtype: str, subtype: str = "") -> str | None:
     base = CHART_TYPE_MAP.get(wtype, DEFAULT_CHART_TYPE)
     st = (subtype or "").lower()
     if base in ("BAR", "COLUMN") and "stacked" in st:
-        return "STACKED_" + base       # bar/stacked -> STACKED_BAR, column/stacked -> STACKED_COLUMN
+        return "ADVANCED_STACKED_" + base   # bar/stacked -> ADVANCED_STACKED_BAR (explicit axis config)
     if base == "SCATTER" and ("bubble" in st or wtype == "chart/bubble"):
         return "ADVANCED_BUBBLE"       # TS bubble = ADVANCED_BUBBLE (x/y/slice/color/size dims)
     return base
@@ -85,6 +85,20 @@ def date_bucket_suffix(level: str | None) -> str | None:
     return DATE_BUCKET_MAP.get((level or "").lower())
 
 
+def _custom_chart_config(slots):
+    """Build an ADVANCED_* chart's `custom_chart_config` from `slots` (a list of
+    (slot_key, [columns])). A slot with columns -> FLAT axes; an empty slot -> a bare,
+    column-less slot (the shape ThoughtSpot exports). Mirrors a cluster-exported answer."""
+    dims = []
+    for key, cols in slots:
+        if cols:
+            dims.append({"key": key, "axes": [{"type": "FLAT", "column": c} for c in cols],
+                         "mode": "AXIS_DRIVEN"})
+        else:
+            dims.append({"key": key, "mode": "AXIS_DRIVEN"})
+    return [{"key": "basic", "dimensions": dims}]
+
+
 def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="COLUMN",
                formulas=None, roles=None, formats=None):
     """Build an Answer TML dict on a Model. `columns` are display names in order;
@@ -114,11 +128,18 @@ def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="C
     elif chart_type in ("PIE", "DONUT") and len(columns) >= 2:
         ax = {"x": xs[:1] or [columns[0]], "y": ys[:1] or [columns[-1]]}
     elif chart_type == "ADVANCED_BUBBLE":   # x/y measures, slice=point dim, slice-with-color, size
-        slots = [("x-axis", xs[:1]), ("y-axis", ys[:1]), ("slice", grains[:1]),
-                 ("slice-with-color", colors[:1]), ("size", sizes[:1]), ("trellis-by", [])]
-        chart["custom_chart_config"] = [{"key": "basic", "dimensions": [
-            ({"key": k, "axes": [{"type": "FLAT", "column": c[0]}], "mode": "AXIS_DRIVEN"}
-             if c else {"key": k, "mode": "AXIS_DRIVEN"}) for k, c in slots]}]
+        chart["custom_chart_config"] = _custom_chart_config(
+            [("x-axis", xs[:1]), ("y-axis", ys[:1]), ("slice", grains[:1]),
+             ("slice-with-color", colors[:1]), ("size", sizes[:1]), ("trellis-by", [])])
+    elif chart_type in ("ADVANCED_STACKED_BAR", "ADVANCED_STACKED_COLUMN") and len(columns) >= 2:
+        bar_dim = xs[:1] or [columns[0]]                  # the category axis (Sisense 'categories' panel)
+        meas = ys or [columns[-1]]                        # the stacked measure(s)
+        if chart_type == "ADVANCED_STACKED_BAR":          # horizontal: measure on x, category on y
+            slots = [("x-axis", meas), ("y-axis", bar_dim)]
+        else:                                             # vertical: category on x, measure on y
+            slots = [("x-axis", bar_dim), ("y-axis", meas)]
+        slots += [("slice-with-color", colors[:1]), ("trellis-by", [])]   # break-by -> the stack split
+        chart["custom_chart_config"] = _custom_chart_config(slots)
     elif chart_type == "SCATTER":           # x/y are measures; first dim -> color
         if roles:
             if xs: ax["x"] = xs[:1]
@@ -280,6 +301,14 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
     measures pending B1, fields not exposed on the model, text/no-chart widgets) are
     skipped and logged as MANUAL coverage rather than breaking the import. Pure: the caller
     validates each Answer and imports.
+
+    A Sisense per-attribute top-N rank filter (e.g. "top 3 Categories by Revenue",
+    `filter: {top: 3, by: sum(Revenue)}`) maps to a ThoughtSpot rank that re-ranks live:
+      - single plotted dim -> a leading `top N` (the row cap IS exactly the top-N members);
+      - the ranked dim plotted alongside others -> a subquery filter
+        `[Category] in ( [Category] top 3 [Category] sort by [Revenue] )`, which keeps the
+        ranked column so the other dimensions keep their full breakdown. Plain search `top N`
+        can't do this (it caps total rows); the subquery is the global, dynamic, faithful form.
     """
     attrs = {c["name"] for c in model_columns
              if (c.get("properties") or {}).get("column_type") == "ATTRIBUTE"}
@@ -373,25 +402,38 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
         if not ok or not cols:
             _flag(report, w.title, reason or "no mappable fields")
             continue
-        top_n = None
+        top_filters = []
         for sf in list(w.filters) + list(dash.filters):   # H5: widget + dashboard filters -> search tokens
-            if sf.kind is FilterKind.TOP_N:                # top-N -> a leading "top N" search keyword
-                try:
-                    top_n = int(sf.values[0])
-                except (TypeError, ValueError, IndexError):
-                    pass
+            if sf.kind is FilterKind.TOP_N:                # a per-attribute rank filter (top 3 Cats by Revenue)
+                top_filters.append(sf)
                 continue
             ftok, fnote = _filter_token(sf, attrs, measures)
             if ftok and ftok not in tokens:
                 tokens.append(ftok)
             elif fnote and cov is Coverage.AUTO:
                 cov, level_note = Coverage.PARTIAL, fnote
-        if top_n and n_dims == 1:                       # "top N" caps total rows, so it is faithful only
-            search_tokens = [f"top {top_n}"] + tokens   # for a single ranked dimension (top 3 categories)
-        else:
-            search_tokens = tokens
-            if top_n and cov is Coverage.AUTO:          # multi-dim: ranking one dimension isn't expressible
-                cov, level_note = Coverage.PARTIAL, f"top-N not applied (ranks 1 of {n_dims} dims; search caps rows)"
+        search_tokens = list(tokens)
+        for sf in top_filters:
+            ranked = _model_col(sf.dim)                 # the attribute being ranked, e.g. 'Category'
+            by = (sf.raw or {}).get("by") or {}
+            by_base = _model_col(by.get("dim"))         # the measure it ranks by, e.g. 'Revenue'
+            try:
+                n = int(sf.values[0])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if ranked not in cols:                       # ranked attribute isn't a plotted column -> can't apply
+                if cov is Coverage.AUTO:
+                    cov, level_note = Coverage.PARTIAL, f"top-{n} on [{ranked}] not applied (column not mapped)"
+                continue
+            if n_dims <= 1:                              # single plotted dim: leading "top N" IS the global top-N
+                search_tokens = [f"top {n}"] + search_tokens
+            elif by_base:                                # one of several plotted dims: a subquery filter keeps the
+                # ranked column (so the other dimensions keep their full breakdown) and re-ranks live (no snapshot)
+                search_tokens.append(f"[{ranked}] in ( [{ranked}] top {n} [{ranked}] sort by [{by_base}] )")
+            elif cov is Coverage.AUTO:                   # multi-dim but the rank measure didn't map -> honest PARTIAL
+                cov, level_note = Coverage.PARTIAL, f"top-{n} on [{ranked}] not applied (rank measure unmapped)"
+                continue
+            level_note = f"top {n} [{ranked}] by {by.get('title') or by_base or 'plotted measure'}"
         answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(search_tokens), cols, ct,
                                   formulas=formulas, roles=roles, formats=formats))
         answer_widgets.append(w.oid)
