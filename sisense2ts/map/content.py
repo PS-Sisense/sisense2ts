@@ -230,6 +230,51 @@ def liveboard_layout(tiles, viz_by_widget, grid_cols=12, px_per_row=46):
     return out
 
 
+# Chart types -> narrative tier, for the story layout. Everything not a KPI / trend / detail
+# table is treated as composition/comparison (pie, bar, column, stacked, bubble, scatter, ...).
+_TIER_KPI = frozenset({"KPI"})
+_TIER_TREND = frozenset({"LINE", "AREA", "LINE_COLUMN", "LINE_STACKED_COLUMN"})
+_TIER_DETAIL = frozenset({"GRID_TABLE", "PIVOT_TABLE"})
+
+
+def _rows(vids, per_row, height, y, grid_cols):
+    """Lay `vids` in rows of up to `per_row`, each row's width split evenly across `grid_cols`
+    (largest-remainder), stacking downward from `y`. Returns (tiles, next_y)."""
+    tiles = []
+    for r in range(0, len(vids), per_row):
+        chunk = vids[r:r + per_row]
+        x = 0
+        for vid, w in zip(chunk, _alloc([1] * len(chunk), grid_cols)):
+            tiles.append({"visualization_id": vid, "x": x, "y": y, "width": w, "height": height})
+            x += w
+        y += height
+    return tiles, y
+
+
+def story_layout(viz_specs, grid_cols=12):
+    """Reflow vizzes into a progressive-disclosure narrative, ignoring the source grid:
+    KPIs (summary) -> trend (over time) -> composition (top/bottom, share) -> detail tables.
+    `viz_specs` is [(viz_id, chart_type)] in display order. Implements the Position +
+    Progressive Disclosure principles from ThoughtSpot's visualization guide: the summary tier
+    reads first (top, packed in a row), detail sinks to the bottom; related composition charts
+    sit two-up (proximity / view-diversely). Within a tier, source order is kept (we can't
+    infer 'most important', so the first KPI lands top-left)."""
+    kpi, trend, comp, detail = [], [], [], []
+    for vid, ct in viz_specs:
+        (kpi if ct in _TIER_KPI else trend if ct in _TIER_TREND
+         else detail if ct in _TIER_DETAIL else comp).append(vid)
+    tiles, y = [], 0
+    if kpi:                                            # summary: one row (wraps past 6), short
+        t, y = _rows(kpi, min(len(kpi), 6), 4, y, grid_cols); tiles += t
+    if trend:                                          # trend: full width, or two-up if several
+        t, y = _rows(trend, min(len(trend), 2), 8, y, grid_cols); tiles += t
+    if comp:                                           # composition: two-up for side-by-side reading
+        t, y = _rows(comp, 2, 9, y, grid_cols); tiles += t
+    if detail:                                         # detail tables: full width, at the bottom
+        t, y = _rows(detail, 1, 11, y, grid_cols); tiles += t
+    return tiles
+
+
 _AGG_PREFIX = {"SUM": "Total ", "COUNT": "Total ", "COUNT_DISTINCT": "Unique Count ",
                "AVERAGE": "Average ", "MIN": "Min ", "MAX": "Max "}
 
@@ -291,7 +336,8 @@ def _format_pattern(fmt: dict) -> str | None:
 
 
 def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
-                     model_columns: list, report: CoverageReport | None = None) -> dict:
+                     model_columns: list, report: CoverageReport | None = None,
+                     faithful_layout: bool = False) -> dict:
     """IR dashboard -> {"answers": [<Answer TML>...], "liveboard": <Liveboard TML>}.
 
     `model_columns` is the Model TML's `columns` list (each {name, properties:{column_type,
@@ -309,13 +355,18 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
         `[Category] in ( [Category] top 3 [Category] sort by [Revenue] )`, which keeps the
         ranked column so the other dimensions keep their full breakdown. Plain search `top N`
         can't do this (it caps total rows); the subquery is the global, dynamic, faithful form.
+
+    Layout: by default the vizzes are reflowed into a progressive-disclosure narrative
+    (`story_layout`: KPIs -> trend -> composition -> detail), since an intuitive flow beats
+    mirroring the source grid for migration value. `faithful_layout=True` instead replicates
+    the Sisense grid placement (`liveboard_layout`) for customers who want it preserved.
     """
     attrs = {c["name"] for c in model_columns
              if (c.get("properties") or {}).get("column_type") == "ATTRIBUTE"}
     measures = {c["name"]: _AGG_PREFIX.get((c.get("properties") or {}).get("aggregation", "SUM"), "Total ") + c["name"]
                 for c in model_columns if (c.get("properties") or {}).get("column_type") == "MEASURE"}
 
-    answers, answer_widgets = [], []
+    answers, answer_widgets, answer_cts = [], [], []
     for w in dash.widgets:
         ct = widget_chart_type(w.wtype, w.subtype)
         if ct is None:
@@ -437,11 +488,15 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
         answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(search_tokens), cols, ct,
                                   formulas=formulas, roles=roles, formats=formats))
         answer_widgets.append(w.oid)
+        answer_cts.append(ct)
         if report:
             note = ct + (" + formula" if formulas else "") + (f"; {level_note}" if level_note else "")
             report.add("widget", w.title, cov, note)
 
-    viz_by_widget = {oid: f"Viz_{i + 1}" for i, oid in enumerate(answer_widgets)}
-    layout = liveboard_layout(dash.layout, viz_by_widget)
+    if faithful_layout:                                # replicate the Sisense grid placement
+        viz_by_widget = {oid: f"Viz_{i + 1}" for i, oid in enumerate(answer_widgets)}
+        layout = liveboard_layout(dash.layout, viz_by_widget)
+    else:                                              # reflow into a progressive-disclosure story
+        layout = story_layout([(f"Viz_{i + 1}", ct) for i, ct in enumerate(answer_cts)])
     return {"answers": answers,
             "liveboard": liveboard_tml(dash.title or model_name, answers, layout)}

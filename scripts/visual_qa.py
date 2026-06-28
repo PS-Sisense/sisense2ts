@@ -13,7 +13,7 @@ import yaml
 from sisense2ts.load import ts_client
 from sisense2ts.verify import visual
 
-DEFAULT = ["462c1712-c2fa-43cc-923d-f73270522ae6"]   # latest faithful auto-converted ECommerce (9/9 AUTO)
+DEFAULT = ["34c97a64-6a9b-43cb-8cdf-676f315c364c"]   # ECommerce, story layout, 9/9 AUTO
 
 
 def main(guids):

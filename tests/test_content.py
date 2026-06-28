@@ -18,6 +18,7 @@ from sisense2ts.map.content import (
     dashboard_to_tml,
     date_bucket_suffix,
     liveboard_layout,
+    story_layout,
 )
 from sisense2ts.map.model import model_to_tml
 
@@ -130,6 +131,31 @@ def test_top_n_multidim_emits_subquery_keeping_ranked_column():
     assert not q.startswith("top 3")                               # not a row cap
     assert "[Category] in ( [Category] top 3 [Category] sort by [Revenue] )" in q
     assert all(it.coverage is Coverage.AUTO for it in rep.items)   # no snapshot, no PARTIAL
+
+
+def test_story_layout_progressive_disclosure():
+    # KPIs (summary) read first at the top, detail tables sink to the bottom, and composition
+    # charts sit two-up. The narrative order ignores the source grid (the Position + Progressive
+    # Disclosure principles from the ThoughtSpot visualization guide).
+    specs = [("Viz_1", "KPI"), ("Viz_2", "LINE"), ("Viz_3", "PIE"),
+             ("Viz_4", "KPI"), ("Viz_5", "GRID_TABLE"), ("Viz_6", "ADVANCED_STACKED_BAR")]
+    by = {t["visualization_id"]: t for t in story_layout(specs)}
+    assert by["Viz_1"]["y"] == 0 and by["Viz_4"]["y"] == 0          # both KPIs in the top row
+    assert by["Viz_1"]["width"] + by["Viz_4"]["width"] == 12        # packed across the grid
+    assert by["Viz_2"]["y"] > by["Viz_1"]["y"]                      # trend sits below the KPIs
+    assert by["Viz_3"]["width"] == 6 and by["Viz_6"]["width"] == 6  # composition two-up
+    assert by["Viz_5"]["y"] == max(t["y"] for t in by.values())     # detail table at the bottom
+    assert by["Viz_5"]["width"] == 12                               # full-width detail
+
+
+def test_dashboard_to_tml_defaults_to_story_layout(raw_datamodel, raw_dashboard_rich):
+    # default layout is the story reflow (not the source grid): a viz lands at y==0 top-left.
+    sm = parse.parse_datamodel(raw_datamodel)
+    mcols = model_to_tml(sm, "conn", "fqn", "db", "sch")["model"]["model"]["columns"]
+    dash = parse.parse_dashboard(raw_dashboard_rich)
+    out = dashboard_to_tml(dash, "M", "model-fqn", mcols)
+    tiles = out["liveboard"]["liveboard"]["layout"]["tiles"]
+    assert tiles and any(t["x"] == 0 and t["y"] == 0 for t in tiles)
 
 
 def test_liveboard_layout_faithful_grid():

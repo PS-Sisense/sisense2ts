@@ -29,8 +29,10 @@ widgets, columns the model doesn't expose) — never emit confidently-wrong logi
 > cluster. The model lands as Tables + a Model querying Databricks
 > (`workspace.sisense_demo`), and a Liveboard of KPIs + charts builds on it.
 > The converter is the `sisense2ts` Python package; this skill is the conductor
-> over it. Known WIP: layout tiling (Phase 4), the parity gate (Phase 5), and
-> JAQL formula translation for calculated measures (`translate_formula`).
+> over it. Layout (Phase 4), the parity gate (Phase 5), and JAQL formula
+> translation (`translate_formula`) are built. Remaining gap: landing the source
+> data in the warehouse so the 3-way parity gate goes truly GREEN (today the
+> Databricks oracle is a synthetic sample, not the ElastiCube data).
 
 > Read `refs/` before relying on shapes: **`refs/tml-gotchas.md`** (import API,
 > auth/token minting, Databricks naming, the Answer `table` block that stops the
@@ -133,11 +135,16 @@ Per-widget rules that are load-bearing (all in `content.py`, detailed in
 - Flag (don't emit) widgets that use a calculated JAQL formula (pending
   `translate_formula`) or reference a column the model doesn't expose.
 
-## Phase 4 — Layout  🔜 WIP
-Translate Sisense's `layout.columns[].cells[].subcells[].elements[]` grid into
-Liveboard tile positions (the IR already carries `TilePosition` from
-`parse._parse_layout`). Apply layout as the **last write**. Today the Liveboard
-stacks; faithful tiling is the next increment.
+## Phase 4 — Layout  ✅ built
+By default the Liveboard is reflowed into a **progressive-disclosure story**
+(`content.story_layout`): KPIs (summary) across the top, then trend (over time),
+then composition (top/bottom, share) two-up, then detail tables at the bottom —
+an intuitive flow rather than a copy of the source grid. (Follows the Position +
+Progressive Disclosure principles from ThoughtSpot's visualization guide.)
+`--faithful-layout` instead replicates the Sisense
+`layout.columns[].cells[].subcells[].elements[]` grid via `content.liveboard_layout`
+(proportional widths from the `TilePosition`s `parse._parse_layout` carries), for
+customers who want their original arrangement preserved. Layout is the last write.
 
 ## Phase 5 — Verify parity  ✅ built (`scripts/verify_parity.py`)
 Do NOT declare success on "TML validated + imported" — validating is not

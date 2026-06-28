@@ -30,7 +30,8 @@ def _aslist(x, key):
     return x if isinstance(x, list) else (x or {}).get(key, [])
 
 
-def run(config: dict, dashboard_oid: str, out_dir: Path, dry_run: bool = False) -> None:
+def run(config: dict, dashboard_oid: str, out_dir: Path, dry_run: bool = False,
+        faithful_layout: bool = False) -> None:
     """Extract a Sisense dashboard -> TML, import in TWO phases (Model, then content bound
     to the read-back Model GUID), and write a coverage report. Auth mints a fresh token
     from the trusted-auth secret_key. --dry-run validates the Model only (no GUID to bind
@@ -67,7 +68,8 @@ def run(config: dict, dashboard_oid: str, out_dir: Path, dry_run: bool = False) 
 
     # 3. MAP content (WS-C/D) bound to the read-back Model GUID, then LOAD it.
     content = map_content.dashboard_to_tml(ir_dash, model_name, model_fqn or "PENDING",
-                                           mb["model"]["model"]["columns"], report=report)
+                                           mb["model"]["model"]["columns"], report=report,
+                                           faithful_layout=faithful_layout)
     if model_fqn and not dry_run:
         # the Liveboard embeds the Answers as visualizations -> import it alone, not the bare answers
         content_tmls = [yaml.safe_dump(content["liveboard"], sort_keys=False)]
@@ -90,11 +92,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dashboard", required=True, help="Sisense dashboard oid")
     ap.add_argument("--out", default=Path("./out"), type=Path)
     ap.add_argument("--dry-run", action="store_true", help="validate TML, do not create objects")
+    ap.add_argument("--faithful-layout", action="store_true",
+                    help="replicate the Sisense grid placement instead of the story-flow reflow")
     args = ap.parse_args(argv)
 
     config = yaml.safe_load(args.config.read_text())
     try:
-        run(config, args.dashboard, args.out, dry_run=args.dry_run)
+        run(config, args.dashboard, args.out, dry_run=args.dry_run,
+            faithful_layout=args.faithful_layout)
     except NotImplementedError as e:
         print(f"[not yet implemented] {e}", file=sys.stderr)
         return 2
