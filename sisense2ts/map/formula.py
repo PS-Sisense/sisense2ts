@@ -54,6 +54,8 @@ FUNCTION_MAP: dict[str, str] = {
     "ln": "ln",        # defensive alias if a JAQL variant uses `ln`
     "log10": "log10",
     "sign": "sign",
+    # date difference -- Sisense DDiff(d1, d2) -> ThoughtSpot diff_days(d1, d2) (days between)
+    "ddiff": "diff_days",
     # statistical (sample variants) -- confirmed in TS 26.6.0 formula reference
     "stdev": "stddev",
     "var": "variance",
@@ -75,9 +77,9 @@ UNSUPPORTED: frozenset[str] = frozenset({
     "ytdsum", "ytdavg", "mtdsum", "mtdavg", "qtdsum", "qtdavg", "wtdsum",
     # time intelligence: prior period
     "pastday", "pastweek", "pastmonth", "pastquarter", "pastyear",
-    # time intelligence: growth / diff
-    "growth", "growthrate", "diffpastyear", "diffpastmonth",
-    "ydiff", "qdiff", "mdiff", "ddiff", "hdiff", "mndiff", "sdiff",
+    # time intelligence: growth / diff  (ddiff is supported -> diff_days, see FUNCTION_MAP)
+    "growth", "growthrate", "diffpastyear", "diffpastmonth", "growthpastyear",
+    "ydiff", "qdiff", "mdiff", "hdiff", "mndiff", "sdiff",
     # population / advanced statistics (no confident TML 1:1; percentile/quartile exist in
     # TS but arg semantics differ from Sisense -> keep MANUAL until verified)
     "stdevp", "varp", "mode", "largest", "smallest",
@@ -106,7 +108,11 @@ def _column_from_dim(dim: str | None) -> str | None:
     s = dim.strip()
     if s.startswith("[") and s.endswith("]"):
         s = s[1:-1]
-    return "[" + s.split(".")[-1] + "]"
+    s = s.split(".")[-1]
+    # drop a trailing date-hierarchy tag so the ref matches the base model column,
+    # e.g. "Discharge_Time (Calendar)" / "Date(Calendar)" -> "Discharge_Time" / "Date".
+    s = re.sub(r"\s*\([^)]*\)\s*$", "", s).strip()
+    return "[" + s + "]"
 
 
 def _agg_to_func(agg: str) -> tuple[str | None, Coverage, str]:

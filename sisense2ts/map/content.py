@@ -10,6 +10,8 @@ fixtures). Unknown types fall back to TABLE.
 """
 from __future__ import annotations
 
+import re
+
 from sisense2ts.ir.models import Coverage, CoverageReport, FilterKind, SourceDashboard
 from sisense2ts.map.formula import translate_formula
 
@@ -57,6 +59,7 @@ _PANEL_ROLE: dict[str, str | None] = {
     "size": "size",
     "point": "grain",
     "min": None, "max": None, "filters": None,
+    "secondary": None,   # a KPI's comparison/growth badge -> not a plotted column (see loop)
 }
 
 
@@ -291,6 +294,13 @@ def _model_col(dim: str) -> str:
     return inner.split(".")[-1].strip() if inner else ""
 
 
+def _safe_name(title: str) -> str:
+    """A formula's name is also a `[name]` search token, so brackets/parens/# in the raw
+    Sisense title (e.g. 'count([Patient ID])', '# PATIENTS') break the search. Strip those
+    to a token-safe, still-readable name ('count Patient ID', 'PATIENTS')."""
+    return re.sub(r"\s+", " ", re.sub(r"[\[\](){}#]", " ", title or "")).strip()
+
+
 def _flag(report, name, reason):
     if report:
         report.add("widget", name, Coverage.MANUAL, reason)
@@ -365,6 +375,8 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
              if (c.get("properties") or {}).get("column_type") == "ATTRIBUTE"}
     measures = {c["name"]: _AGG_PREFIX.get((c.get("properties") or {}).get("aggregation", "SUM"), "Total ") + c["name"]
                 for c in model_columns if (c.get("properties") or {}).get("column_type") == "MEASURE"}
+    measure_agg = {c["name"]: ((c.get("properties") or {}).get("aggregation", "SUM") or "SUM").lower()
+                   for c in model_columns if (c.get("properties") or {}).get("column_type") == "MEASURE"}
 
     answers, answer_widgets, answer_cts = [], [], []
     for w in dash.widgets:
@@ -379,7 +391,13 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
         cov, n_dims = Coverage.AUTO, 0   # n_dims = plotted dimension columns (drives top-N applicability)
         for f in w.fields:
             role = _panel_role(f.panel)
-            if role is None:   # gauge min/max bounds, filters -> not a plotted column
+            if role is None:   # gauge min/max bounds, filters, KPI secondary badge -> not a plotted column
+                # A KPI's secondary comparison/growth badge isn't a plotted column. If it needs a
+                # function we don't translate (e.g. GrowthPastYear, time-intelligence), the primary
+                # value still converts; flag PARTIAL so the dropped badge is visible, not silent.
+                if (f.panel or "").lower() == "secondary" and f.formula and cov is Coverage.AUTO \
+                        and translate_formula(f.formula).coverage is not Coverage.AUTO:
+                    cov, level_note = Coverage.PARTIAL, "YoY comparison badge dropped (no clean ThoughtSpot formula)"
                 continue
             if f.formula:      # calculated measure -> translate JAQL to a TML formula
                 tr = translate_formula(f.formula)
@@ -388,7 +406,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                     break
                 if "[" not in (tr.expr or ""):   # a bare constant (e.g. a gauge bound) -> not a column
                     continue
-                fname = (f.title or "").strip() or f"Calc {len(formulas) + 1}"
+                fname = _safe_name(f.title) or f"Calc {len(formulas) + 1}"
                 if fname in seen:
                     continue
                 seen.add(fname)
@@ -407,8 +425,25 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                 if base in measures or base in attrs:
                     name = base
             is_dim = False
-            if name in measures:                 # a model measure (its default agg applies)
+            override_fn = None
+            if name in measures and f.agg:       # widget may override the measure's default agg
+                fn = _AGG_FUNC.get((f.agg or "").lower())
+                if fn and fn != _AGG_FUNC.get(measure_agg.get(name, "sum"), "sum"):
+                    override_fn = fn            # e.g. AVG of a SUM measure -> emit a formula, not the default
+            if name in measures and not override_fn:   # a model measure (its default agg applies)
                 disp = measures[name]
+            elif override_fn:                    # measure aggregated differently than its model default
+                fname = _safe_name(f.title) or f"{f.agg.title()} {name}"
+                if fname not in seen:
+                    seen.add(fname)
+                    formulas.append({"id": f"formula_{len(formulas) + 1}", "name": fname,
+                                     "expr": f"{override_fn}([{name}])"})
+                    tokens.append(f"[{fname}]")
+                    cols.append(fname)
+                    roles[fname] = role or "y"
+                    if (fp := _format_pattern(f.fmt)):
+                        formats[fname] = fp
+                continue
             elif f.agg and name in attrs:        # agg on an attribute (e.g. count of an ID) -> calc measure
                 aggl = (f.agg or "").lower()
                 # Sisense count on a dimension is a DISTINCT count ("how many X") -> unique count.
@@ -416,7 +451,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                 if not fn:
                     ok, reason = False, f"unsupported aggregation '{f.agg}'"
                     break
-                fname = (f.title or "").strip() or f"{f.agg.title()} {name}"
+                fname = _safe_name(f.title) or f"{f.agg.title()} {name}"
                 if fname in seen:
                     continue
                 seen.add(fname)
@@ -464,8 +499,12 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
             elif fnote and cov is Coverage.AUTO:
                 cov, level_note = Coverage.PARTIAL, fnote
         search_tokens = list(tokens)
-        for sf in top_filters:
+        ranked_done = set()                              # a column may carry the same top-N on both the
+        for sf in top_filters:                           # widget AND the dashboard -> apply it only once
             ranked = _model_col(sf.dim)                 # the attribute being ranked, e.g. 'Category'
+            if ranked in ranked_done:
+                continue
+            ranked_done.add(ranked)
             by = (sf.raw or {}).get("by") or {}
             by_base = _model_col(by.get("dim"))         # the measure it ranks by, e.g. 'Revenue'
             try:

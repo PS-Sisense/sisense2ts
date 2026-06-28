@@ -33,6 +33,27 @@ def test_translate_simple_formula():
     assert result.expr == "sum([Revenue]) / count([Order ID])"
 
 
+def test_ddiff_maps_to_diff_days_stripping_date_hierarchy():
+    # Sisense Avg(DDiff(discharge, admission)) -> length of stay. DDiff -> diff_days, and the
+    # date-hierarchy tag "(Calendar)" is stripped so the ref matches the base model column.
+    f = Formula(
+        expression="Avg(DDiff([disc],[adm]))",
+        context={"[disc]": {"dim": "[Admissions.Discharge_Time (Calendar)]"},
+                 "[adm]": {"dim": "[Admissions.Admission_Time(Calendar)]"}},
+    )
+    result = translate_formula(f)
+    assert result.coverage is Coverage.AUTO
+    assert result.expr == "average(diff_days([Discharge_Time],[Admission_Time]))"
+
+
+def test_growthpastyear_is_manual():
+    # time-intelligence (YoY growth) stays MANUAL with a clear note (not silently wrong)
+    f = Formula(expression="GrowthPastYear([m])", context={"[m]": {"dim": "[Admissions.Cost_of_admission]"}})
+    result = translate_formula(f)
+    assert result.coverage is Coverage.MANUAL
+    assert "growthpastyear" in (result.note or "").lower()
+
+
 def test_translate_bare_placeholder_applies_context_agg():
     # Placeholders appear unaggregated in the expression; the context agg supplies it.
     f = Formula(

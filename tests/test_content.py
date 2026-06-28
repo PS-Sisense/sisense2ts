@@ -133,6 +133,52 @@ def test_top_n_multidim_emits_subquery_keeping_ranked_column():
     assert all(it.coverage is Coverage.AUTO for it in rep.items)   # no snapshot, no PARTIAL
 
 
+def test_measure_agg_override_emits_formula():
+    # A widget that AVERAGEs a measure whose model default is SUM must emit average([col]),
+    # not the bare measure (which would show the SUM). Guards the "avg cost shows total" bug.
+    w = SourceWidget(oid="1", title="AVERAGE ADMISSION COST", wtype="indicator", subtype="indicator/numeric",
+                     fields=[Field(kind=FieldKind.MEASURE, dim="[Admissions.Cost_of_admission]",
+                                   agg="avg", panel="value", title="Average Cost")])
+    mcols = [{"name": "Cost_of_admission", "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]
+    out = dashboard_to_tml(SourceDashboard(oid="d", title="D", widgets=[w]), "M", "fqn", mcols)
+    a = out["answers"][0]
+    assert a["formulas"] == [{"id": "formula_1", "name": "Average Cost",
+                              "expr": "average([Cost_of_admission])"}]
+    assert "[Average Cost]" in a["search_query"]
+
+
+def test_safe_formula_name_strips_special_chars():
+    # a Sisense title that is itself a formula expr ('count([Patient ID])') would break the
+    # [name] search token; it is sanitized to a token-safe name.
+    w = SourceWidget(oid="1", title="By Division", wtype="chart/column",
+                     fields=[Field(kind=FieldKind.DIMENSION, dim="[Divisions.Divison_name]", panel="categories"),
+                             Field(kind=FieldKind.MEASURE, dim="[Admissions.Patient_ID]", agg="count",
+                                   panel="values", title="count([Patient ID])")])
+    mcols = [{"name": "Divison_name", "properties": {"column_type": "ATTRIBUTE"}},
+             {"name": "Patient_ID", "properties": {"column_type": "ATTRIBUTE"}}]
+    out = dashboard_to_tml(SourceDashboard(oid="d", title="D", widgets=[w]), "M", "fqn", mcols)
+    q = out["answers"][0]["search_query"]
+    assert "[count Patient ID]" in q and "(" not in q and "[" in q   # no parens leaked into the token
+
+
+def test_kpi_secondary_growth_badge_dropped_not_fatal():
+    # a KPI's primary value converts even when its secondary YoY badge needs an unsupported
+    # function; the widget is PARTIAL (badge dropped), not MANUAL (whole widget lost).
+    from sisense2ts.ir.models import Formula
+    w = SourceWidget(oid="1", title="TOTAL COST", wtype="indicator", subtype="indicator/numeric",
+                     fields=[Field(kind=FieldKind.MEASURE, dim="[Admissions.Cost_of_admission]",
+                                   agg="sum", panel="value"),
+                             Field(kind=FieldKind.MEASURE, panel="secondary", title="ANNUAL CHANGE",
+                                   formula=Formula(expression="GrowthPastYear([m])",
+                                                   context={"[m]": {"dim": "[Admissions.Cost_of_admission]"}}))])
+    mcols = [{"name": "Cost_of_admission", "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]
+    rep = CoverageReport()
+    out = dashboard_to_tml(SourceDashboard(oid="d", title="D", widgets=[w]), "M", "fqn", mcols, rep)
+    assert out["answers"] and out["answers"][0]["chart"]["type"] == "KPI"   # the KPI still converts
+    assert any(it.coverage is Coverage.PARTIAL for it in rep.items)         # badge drop flagged
+    assert not any(it.coverage is Coverage.MANUAL for it in rep.items)
+
+
 def test_story_layout_progressive_disclosure():
     # KPIs (summary) read first at the top, detail tables sink to the bottom, and composition
     # charts sit two-up. The narrative order ignores the source grid (the Position + Progressive
