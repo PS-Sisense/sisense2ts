@@ -101,22 +101,28 @@ def model_to_tml(model: SourceModel, connection_name: str, connection_fqn: str,
             tbl["joins_with"] = joins_with[t.id]
         tables.append({"table": tbl})
 
-    # Model columns: dedupe by display name. IDs are kept (exposed as attributes) so
-    # count-style KPIs over a key (e.g. "Total Brands" = unique count of Brand ID) resolve.
-    seen: set = set()
-    mcols = []
+    # Model columns: expose ONE column per display name (the model requires unique names).
+    # When the same name appears in several tables (e.g. Patient_ID in both the fact and a
+    # secondary fact, or ID in every table), bind it to the MOST-CONNECTED table -- the fact --
+    # so measures/counts resolve against the fact, not an incidental dimension that happens to
+    # sort first. First-seen-wins silently misbinds (count([Patient_ID]) -> ER's 12 rows, not
+    # Admissions' 240). IDs are kept (as attributes) so count-of-key KPIs still resolve.
+    best: dict = {}   # display name -> (connectedness score, table, column), keep the highest
     for t in model.tables:
+        score = part[t.id]
         for c in t.columns:
-            if c.name in seen:
-                continue
-            seen.add(c.name)
-            ctype, agg = _role(c)
-            props = {"column_type": ctype}
-            if agg:
-                props["aggregation"] = agg
-            mcols.append({"name": c.name, "column_id": f"{_clean(t.id)}::{c.name}", "properties": props})
-            if report:
-                report.add("column", c.name, Coverage.AUTO, ctype.lower())
+            cur = best.get(c.name)
+            if cur is None or score > cur[0]:
+                best[c.name] = (score, t, c)
+    mcols = []
+    for name, (_, t, c) in best.items():
+        ctype, agg = _role(c)
+        props = {"column_type": ctype}
+        if agg:
+            props["aggregation"] = agg
+        mcols.append({"name": c.name, "column_id": f"{_clean(t.id)}::{c.name}", "properties": props})
+        if report:
+            report.add("column", c.name, Coverage.AUTO, ctype.lower())
 
     model_tables = []
     for t in model.tables:
