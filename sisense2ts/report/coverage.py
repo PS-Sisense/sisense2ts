@@ -12,11 +12,18 @@ from sisense2ts.ir.models import Coverage, CoverageReport
 _ICON = {Coverage.AUTO: "OK", Coverage.PARTIAL: "REVIEW", Coverage.MANUAL: "MANUAL"}
 
 
-def render_markdown(report: CoverageReport, title: str = "Conversion coverage") -> str:
+def render_markdown(report: CoverageReport, title: str = "Conversion coverage",
+                    meta: dict | None = None) -> str:
+    """Render the coverage report. `meta` (ordered) renders as a header block above the
+    counts -- e.g. Source / Target / Generated -- so the report is self-contained."""
     counts = report.counts()
-    lines = [
-        f"# {title}",
-        "",
+    lines = [f"# {title}", ""]
+    for k, v in (meta or {}).items():
+        if v:
+            lines.append(f"- **{k}:** {v}")
+    if meta:
+        lines.append("")
+    lines += [
         f"- Auto-converted: **{counts['auto']}**",
         f"- Needs review: **{counts['partial']}**",
         f"- Manual: **{counts['manual']}**",

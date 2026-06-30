@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -70,19 +71,28 @@ def run(config: dict, dashboard_oid: str, out_dir: Path, dry_run: bool = False,
     content = map_content.dashboard_to_tml(ir_dash, model_name, model_fqn or "PENDING",
                                            mb["model"]["model"]["columns"], report=report,
                                            faithful_layout=faithful_layout)
+    board_url = ""
     if model_fqn and not dry_run:
         # the Liveboard embeds the Answers as visualizations -> import it alone, not the bare answers
         content_tmls = [yaml.safe_dump(content["liveboard"], sort_keys=False)]
         for item in ts_client.import_tml(base, token, content_tmls):
             code, nm, guid = ts_client.status_of(item)
-            tag = f"  {base.rstrip('/')}/#/pinboard/{guid}" if guid and nm == (ir_dash.title or model_name) else ""
-            print(f"  content: {code} {nm}{tag}")
+            if guid and nm == (ir_dash.title or model_name):
+                board_url = f"{base.rstrip('/')}/#/pinboard/{guid}"
+            print(f"  content: {code} {nm}{('  ' + board_url) if board_url and code != 'ERROR' else ''}")
     else:
         print("  content: skipped (dry-run / no model GUID); coverage still computed")
 
-    # 4. REPORT (WS-E)
+    # 4. REPORT (WS-E) - self-contained: source, target board, model, timestamp in the header
+    meta = {
+        "Source": f'Sisense dashboard "{ir_dash.title}" (data model: {ds_title})',
+        "Target": f"ThoughtSpot Liveboard - {board_url}" if board_url
+                  else ("validated only (dry-run, not imported)" if dry_run else "not imported"),
+        "Model": f"{model_name}" + (f" ({model_fqn})" if model_fqn else ""),
+        "Generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    }
     cov = out_dir / "coverage.md"
-    cov.write_text(render_markdown(report, f"Coverage: {ir_dash.title}"))
+    cov.write_text(render_markdown(report, f"Coverage: {ir_dash.title}", meta=meta))
     print(f"coverage -> {cov}  {report.counts()}")
 
 
