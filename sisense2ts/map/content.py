@@ -103,7 +103,7 @@ def _custom_chart_config(slots):
 
 
 def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="COLUMN",
-               formulas=None, roles=None, formats=None):
+               formulas=None, roles=None, formats=None, series_types=None):
     """Build an Answer TML dict on a Model. `columns` are display names in order;
     a model measure with aggregation appears as 'Total <col>' (e.g. 'Total Revenue').
     `roles` maps each display name to its source-panel axis role
@@ -153,6 +153,10 @@ def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="C
                 ax["color"] = xs[:1]
         if colors:
             ax["color"] = colors[:1]
+    elif chart_type == "LINE_COLUMN" and len(columns) >= 2:   # combo: column-typed measures first
+        st = series_types or {}                               # (TS renders the first y as columns, rest as a line)
+        y_ordered = [c for c in ys if st.get(c) == "column"] + [c for c in ys if st.get(c) != "column"]
+        ax = {"x": xs[:1] or [columns[0]], "y": y_ordered or ys or [columns[-1]]}
     elif chart_type in ("COLUMN", "BAR", "LINE", "AREA", "STACKED_COLUMN", "STACKED_BAR") and len(columns) >= 2:
         ax = {"x": xs[:1] or [columns[0]], "y": ys or [columns[-1]]}
         series = colors or (xs[1:] if not roles else [])   # break-by / extra dims -> series
@@ -388,6 +392,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
             _flag(report, w.title, "no fields")
             continue
         tokens, cols, seen, formulas, roles, formats, ok, reason, level_note = [], [], set(), [], {}, {}, True, "", ""
+        series_types: dict = {}          # col -> per-series chart type ('column'/'line') for combo detection
         cov, n_dims = Coverage.AUTO, 0   # n_dims = plotted dimension columns (drives top-N applicability)
         for f in w.fields:
             role = _panel_role(f.panel)
@@ -414,6 +419,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                 tokens.append(f"[{fname}]")
                 cols.append(fname)
                 roles[fname] = role or "y"
+                series_types[fname] = f.series_type
                 if (fp := _format_pattern(f.fmt)):
                     formats[fname] = fp
                 if tr.coverage is Coverage.PARTIAL:
@@ -441,6 +447,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                     tokens.append(f"[{fname}]")
                     cols.append(fname)
                     roles[fname] = role or "y"
+                    series_types[fname] = f.series_type
                     if (fp := _format_pattern(f.fmt)):
                         formats[fname] = fp
                 continue
@@ -460,6 +467,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                 tokens.append(f"[{fname}]")
                 cols.append(fname)
                 roles[fname] = role or "y"
+                series_types[fname] = f.series_type
                 if (fp := _format_pattern(f.fmt)):
                     formats[fname] = fp
                 continue
@@ -481,6 +489,7 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
             tokens.append(col_tok)
             cols.append(disp)
             roles[disp] = role or "x"
+            series_types[disp] = f.series_type
             if is_dim:
                 n_dims += 1
             if (fp := _format_pattern(f.fmt)):
@@ -524,8 +533,17 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
                 cov, level_note = Coverage.PARTIAL, f"top-{n} on [{ranked}] not applied (rank measure unmapped)"
                 continue
             level_note = f"top {n} [{ranked}] by {by.get('title') or by_base or 'plotted measure'}"
+        # Combo (bar+line): a cartesian widget whose value series have MIXED types -- e.g. a
+        # Sisense line chart with one value carrying singleSeriesType 'column' -> ThoughtSpot
+        # LINE_COLUMN. answer_tml puts the column-typed measures first in y (TS renders the
+        # first y as columns, the rest as a line), reproducing the source's bar+line intent.
+        if ct in ("LINE", "COLUMN", "BAR", "AREA"):
+            base_series = "column" if ct in ("COLUMN", "BAR") else "line"
+            y_kinds = [(series_types.get(c) or base_series) for c in cols if roles.get(c) == "y"]
+            if len(y_kinds) >= 2 and "column" in y_kinds and "line" in y_kinds:
+                ct = "LINE_COLUMN"
         answers.append(answer_tml(w.title, model_name, model_fqn, " ".join(search_tokens), cols, ct,
-                                  formulas=formulas, roles=roles, formats=formats))
+                                  formulas=formulas, roles=roles, formats=formats, series_types=series_types))
         answer_widgets.append(w.oid)
         answer_cts.append(ct)
         if report:

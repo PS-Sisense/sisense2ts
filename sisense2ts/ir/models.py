@@ -133,6 +133,7 @@ class Field:
     formula: Optional[Formula] = None  # set when this is a calculated measure
     level: Optional[str] = None      # date-dimension granularity (days/weeks/months/quarters/years); WS-D -> TS date bucket
     fmt: dict = field(default_factory=dict)  # Sisense format block, if any
+    series_type: Optional[str] = None  # per-series chart type ('line'|'column') on a combo widget
     raw: dict = field(default_factory=dict)
 
 

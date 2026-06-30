@@ -179,6 +179,24 @@ def test_kpi_secondary_growth_badge_dropped_not_fatal():
     assert not any(it.coverage is Coverage.MANUAL for it in rep.items)
 
 
+def test_combo_line_column_orders_column_series_first():
+    # a line widget with one value carrying singleSeriesType 'column' is a bar+line combo ->
+    # LINE_COLUMN, with the column-typed measure first in y (TS draws the first y as columns).
+    w = SourceWidget(oid="1", title="REVENUE vs UNITS", wtype="chart/line", subtype="line/spline",
+                     fields=[Field(kind=FieldKind.DIMENSION, dim="[Commerce.Date]", level="months", panel="x-axis"),
+                             Field(kind=FieldKind.MEASURE, dim="[Commerce.Revenue]", agg="sum", panel="values"),
+                             Field(kind=FieldKind.MEASURE, dim="[Commerce.Quantity]", agg="sum", panel="values",
+                                   series_type="column")])
+    mcols = [{"name": "Date", "properties": {"column_type": "ATTRIBUTE"}},
+             {"name": "Revenue", "properties": {"column_type": "MEASURE", "aggregation": "SUM"}},
+             {"name": "Quantity", "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]
+    out = dashboard_to_tml(SourceDashboard(oid="d", title="D", widgets=[w]), "M", "fqn", mcols)
+    a = out["answers"][0]
+    assert a["chart"]["type"] == "LINE_COLUMN"
+    # Quantity (column series) precedes Revenue (line) in the y axis, even though source lists Revenue first
+    assert a["chart"]["axis_configs"][0]["y"] == ["Total Quantity", "Total Revenue"]
+
+
 def test_story_layout_progressive_disclosure():
     # KPIs (summary) read first at the top, detail tables sink to the bottom, and composition
     # charts sit two-up. The narrative order ignores the source grid (the Position + Progressive

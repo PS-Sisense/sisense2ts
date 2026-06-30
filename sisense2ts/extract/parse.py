@@ -150,6 +150,7 @@ def parse_widget(widget: dict) -> SourceWidget:
         if field:
             field.panel = pname
             field.fmt = item.get("format") or field.fmt   # Sisense format is on the ITEM, not the jaql
+            field.series_type = item.get("singleSeriesType")   # combo: per-series 'column'/'line' (item-level)
             fields.append(field)
         if jaql.get("filter"):
             sf = classify_filter(jaql)
