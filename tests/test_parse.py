@@ -40,3 +40,14 @@ def test_parse_captures_date_level(raw_dashboard_rich):
     d = parse.parse_dashboard(raw_dashboard_rich)
     levels = {f.level for w in d.widgets for f in w.fields if f.level}
     assert "months" in levels
+
+
+def test_offline_bundle_contract(raw_datamodel):
+    # --dump-source writes {dashboard, widgets, datamodel}; --from-json reads the same shape
+    # and feeds the SAME parse functions as the live path. Verify that contract parses.
+    bundle = {"dashboard": {"title": "D", "datasource": {"title": "X"}},
+              "widgets": {"widgets": []}, "datamodel": raw_datamodel}
+    ir_model = parse.parse_datamodel(bundle["datamodel"])
+    ir_dash = parse.parse_dashboard(bundle["dashboard"], bundle["widgets"]["widgets"])
+    assert ir_model.tables            # model leg (binding-critical) parses
+    assert ir_dash.title == "D"       # dashboard leg parses

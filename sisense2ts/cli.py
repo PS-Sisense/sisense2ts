@@ -12,6 +12,7 @@ exactly as below so partial progress is demoable (e.g. M1 = stop after model imp
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,24 +33,42 @@ def _aslist(x, key):
 
 
 def run(config: dict, dashboard_oid: str, out_dir: Path, dry_run: bool = False,
-        faithful_layout: bool = False) -> None:
+        faithful_layout: bool = False, from_json: Path | None = None,
+        dump_source: Path | None = None) -> None:
     """Extract a Sisense dashboard -> TML, import in TWO phases (Model, then content bound
     to the read-back Model GUID), and write a coverage report. Auth mints a fresh token
     from the trusted-auth secret_key. --dry-run validates the Model only (no GUID to bind
-    content to without an import) but still computes + writes the coverage report."""
+    content to without an import) but still computes + writes the coverage report.
+
+    `from_json` reads a previously-captured source bundle ({dashboard, widgets, datamodel})
+    instead of calling Sisense -- an offline path that needs no Sisense token. `dump_source`
+    writes that bundle during a live run so it can be replayed later."""
     report = CoverageReport()
     out_dir.mkdir(parents=True, exist_ok=True)
     S, D, T = config["sisense"], config["databricks"], config["thoughtspot"]
 
-    # 1. EXTRACT (WS-A): dashboard + its widgets (a separate call) + the backing data model.
-    sis = SisenseClient(S["base_url"], S["token"])
-    raw_dash = sis.get_dashboard(dashboard_oid)
-    ir_dash = parse.parse_dashboard(raw_dash, _aslist(sis.get_widgets(dashboard_oid), "widgets"))
+    # 1. EXTRACT (WS-A): the raw source (dashboard + widgets + backing data model), from a
+    # captured JSON bundle (offline, no Sisense token) or live over the Sisense REST API.
+    if from_json:
+        bundle = json.loads(Path(from_json).read_text())
+        raw_dash, raw_widgets, raw_model = bundle["dashboard"], bundle["widgets"], bundle["datamodel"]
+        print(f"loaded source bundle: {from_json}")
+    else:
+        sis = SisenseClient(S["base_url"], S["token"])
+        raw_dash = sis.get_dashboard(dashboard_oid)
+        raw_widgets = sis.get_widgets(dashboard_oid)
+        ds0 = (raw_dash.get("datasource") or {}).get("title", "")
+        models = _aslist(sis.list_datamodels(), "datamodels")
+        mt = next((m for m in models if (m.get("title", "") or "") == ds0), None)
+        model_oid = (mt or {}).get("oid") or S.get("datamodel_id")
+        raw_model = sis.export_datamodel(model_oid)
+        if dump_source:
+            Path(dump_source).write_text(json.dumps(
+                {"dashboard": raw_dash, "widgets": raw_widgets, "datamodel": raw_model}))
+            print(f"wrote source bundle: {dump_source}")
+    ir_dash = parse.parse_dashboard(raw_dash, _aslist(raw_widgets, "widgets"))
     ds_title = (raw_dash.get("datasource") or {}).get("title", "")
-    models = _aslist(sis.list_datamodels(), "datamodels")
-    mt = next((m for m in models if (m.get("title", "") or "") == ds_title), None)
-    model_oid = (mt or {}).get("oid") or S.get("datamodel_id")
-    ir_model = parse.parse_datamodel(sis.export_datamodel(model_oid))
+    ir_model = parse.parse_datamodel(raw_model)
     model_name = f"{ir_model.name} (Sisense)"
     print(f"extracted '{ir_dash.title}': {len(ir_model.tables)} tables, {len(ir_dash.widgets)} widgets")
 
@@ -99,17 +118,24 @@ def run(config: dict, dashboard_oid: str, out_dir: Path, dry_run: bool = False,
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="sisense2ts")
     ap.add_argument("--config", required=True, type=Path)
-    ap.add_argument("--dashboard", required=True, help="Sisense dashboard oid")
+    ap.add_argument("--dashboard", help="Sisense dashboard oid (live mode; not needed with --from-json)")
     ap.add_argument("--out", default=Path("./out"), type=Path)
     ap.add_argument("--dry-run", action="store_true", help="validate TML, do not create objects")
     ap.add_argument("--faithful-layout", action="store_true",
                     help="replicate the Sisense grid placement instead of the story-flow reflow")
+    ap.add_argument("--from-json", type=Path,
+                    help="convert from a captured source bundle (offline; no Sisense token needed)")
+    ap.add_argument("--dump-source", type=Path,
+                    help="during a live run, write the source bundle to this path for offline replay")
     args = ap.parse_args(argv)
+    if not args.dashboard and not args.from_json:
+        ap.error("one of --dashboard (live) or --from-json (offline) is required")
 
     config = yaml.safe_load(args.config.read_text())
     try:
         run(config, args.dashboard, args.out, dry_run=args.dry_run,
-            faithful_layout=args.faithful_layout)
+            faithful_layout=args.faithful_layout, from_json=args.from_json,
+            dump_source=args.dump_source)
     except NotImplementedError as e:
         print(f"[not yet implemented] {e}", file=sys.stderr)
         return 2
