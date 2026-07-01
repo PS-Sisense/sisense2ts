@@ -185,13 +185,16 @@ def answer_tml(name, model_name, model_fqn, search_query, columns, chart_type="C
     return answer
 
 
-def liveboard_tml(name, answers, layout=None):
+def liveboard_tml(name, answers, layout=None, filters=None):
     """Wrap a list of Answer dicts into a Liveboard TML dict; `layout` (a list of tile
-    dicts) is emitted as the Liveboard's `layout.tiles` when present."""
+    dicts) is emitted as `layout.tiles`, and `filters` (a list of liveboard-filter dicts)
+    as the Liveboard's `filters` -- the interactive chips that apply across every viz."""
     viz = [{"id": f"Viz_{i+1}", "answer": a} for i, a in enumerate(answers)]
     lb = {"name": name, "visualizations": viz}
     if layout:
         lb["layout"] = {"tiles": layout}
+    if filters:
+        lb["filters"] = filters
     return {"liveboard": lb}
 
 
@@ -328,6 +331,39 @@ def _filter_token(sf, attrs, measures):
     if sf.kind is FilterKind.TOP_N:
         return "", f"top-N on [{col}] not applied (display cap)"
     return "", ""
+
+
+def liveboard_filters(filters, attrs, measures, report=None):
+    """Sisense DASHBOARD-level filters (the interactive filter bar) -> ThoughtSpot Liveboard
+    filter chips that apply across every viz. A member/exclude selection carries its preset
+    (generic_filter IN/NOT_IN); an 'all' / range / relative-date / unrecognized filter still
+    becomes an interactive chip on the column, with its source preset flagged as not-applied
+    (never silently dropped). Returns the list of liveboard-filter dicts."""
+    out = []
+    for sf in filters:
+        col = _model_col(sf.dim)
+        if col not in attrs and col not in measures:
+            col = col.split(" (")[0].strip()   # strip a date-hierarchy tag: 'Date (Calendar)' -> 'Date'
+        if col not in attrs and col not in measures:
+            if report:
+                report.add("filter", col or (sf.dim or "?"), Coverage.PARTIAL,
+                           "dashboard filter not applied (column not exposed on the model)")
+            continue
+        chip = {"column": [col], "is_mandatory": False, "is_single_value": False, "display_name": ""}
+        if sf.kind is FilterKind.MEMBER and sf.values:
+            chip["generic_filter"] = {"oper": "IN", "values": [str(v) for v in sf.values]}
+            cov, note = Coverage.AUTO, "liveboard filter chip (members preset)"
+        elif sf.kind is FilterKind.EXCLUDE and sf.values:
+            chip["generic_filter"] = {"oper": "NOT_IN", "values": [str(v) for v in sf.values]}
+            cov, note = Coverage.AUTO, "liveboard filter chip (exclude preset)"
+        elif (sf.raw or {}).get("all") or sf.kind is FilterKind.MEMBER:
+            cov, note = Coverage.AUTO, "liveboard filter chip (all / interactive)"
+        else:   # range / relative-date / unrecognized preset -> chip present, preset not carried
+            cov, note = Coverage.PARTIAL, "liveboard filter chip (interactive; source preset not carried)"
+        out.append(chip)
+        if report:
+            report.add("filter", col, cov, note)
+    return out
 
 
 def _format_pattern(fmt: dict) -> str | None:
@@ -497,10 +533,11 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
         if not ok or not cols:
             _flag(report, w.title, reason or "no mappable fields")
             continue
-        top_filters = []
-        for sf in list(w.filters) + list(dash.filters):   # H5: widget + dashboard filters -> search tokens
-            if sf.kind is FilterKind.TOP_N:                # a per-attribute rank filter (top 3 Cats by Revenue)
-                top_filters.append(sf)
+        # top-N ranks apply per-viz (from the widget or dashboard); other per-WIDGET filters
+        # bake into this answer's search. Dashboard-level filters become Liveboard chips below.
+        top_filters = [sf for sf in list(w.filters) + list(dash.filters) if sf.kind is FilterKind.TOP_N]
+        for sf in w.filters:
+            if sf.kind is FilterKind.TOP_N:
                 continue
             ftok, fnote = _filter_token(sf, attrs, measures)
             if ftok and ftok not in tokens:
@@ -555,5 +592,8 @@ def dashboard_to_tml(dash: SourceDashboard, model_name: str, model_fqn: str,
         layout = liveboard_layout(dash.layout, viz_by_widget)
     else:                                              # reflow into a progressive-disclosure story
         layout = story_layout([(f"Viz_{i + 1}", ct) for i, ct in enumerate(answer_cts)])
+    # dashboard-level filters -> interactive Liveboard filter chips (apply across every viz)
+    lb_filters = liveboard_filters([sf for sf in dash.filters if sf.kind is not FilterKind.TOP_N],
+                                   attrs, measures, report)
     return {"answers": answers,
-            "liveboard": liveboard_tml(dash.title or model_name, answers, layout)}
+            "liveboard": liveboard_tml(dash.title or model_name, answers, layout, filters=lb_filters)}

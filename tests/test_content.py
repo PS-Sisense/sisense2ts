@@ -179,6 +179,43 @@ def test_kpi_secondary_growth_badge_dropped_not_fatal():
     assert not any(it.coverage is Coverage.MANUAL for it in rep.items)
 
 
+def test_liveboard_filters_presets_all_and_unmapped():
+    from sisense2ts.map.content import liveboard_filters
+    attrs = {"Country", "Date", "Gender"}
+    measures = {"Revenue": "Total Revenue"}
+    fs = [SourceFilter(FilterKind.MEMBER, "[c.Country]", "members", ["US", "UK"]),
+          SourceFilter(FilterKind.EXCLUDE, "[c.Gender]", "exclude", ["Unspecified"]),
+          SourceFilter(FilterKind.MEMBER, "[c.Date]", "members", [], raw={"all": True}),
+          SourceFilter(FilterKind.RANGE, "[c.Revenue]", "range", [], raw={"fromNotEqual": 0}),
+          SourceFilter(FilterKind.UNKNOWN, "[c.Nope]", "x", [])]
+    rep = CoverageReport()
+    by = {f["column"][0]: f for f in liveboard_filters(fs, attrs, measures, rep)}
+    assert by["Country"]["generic_filter"] == {"oper": "IN", "values": ["US", "UK"]}
+    assert by["Gender"]["generic_filter"] == {"oper": "NOT_IN", "values": ["Unspecified"]}
+    assert "generic_filter" not in by["Date"]        # all -> bare interactive chip
+    assert "generic_filter" not in by["Revenue"]     # range -> chip, preset not carried
+    assert "Nope" not in by                          # column not on the model -> no chip
+    covs = {it.name: it.coverage for it in rep.items if it.object_type == "filter"}
+    assert covs["Country"] is Coverage.AUTO and covs["Date"] is Coverage.AUTO
+    assert covs["Revenue"] is Coverage.PARTIAL and covs["Nope"] is Coverage.PARTIAL  # flagged, not silent
+
+
+def test_dashboard_filters_become_liveboard_chips_widget_filters_stay():
+    # a DASHBOARD-level filter -> a Liveboard chip; a per-WIDGET exclude stays baked in the search
+    w = SourceWidget(oid="1", title="Pie", wtype="chart/pie", subtype="pie/classic",
+                     fields=[Field(kind=FieldKind.DIMENSION, dim="[c.Gender]", panel="categories"),
+                             Field(kind=FieldKind.MEASURE, dim="[c.Revenue]", agg="sum", panel="values")],
+                     filters=[SourceFilter(FilterKind.EXCLUDE, "[c.Gender]", "exclude", ["Unspecified"])])
+    dash = SourceDashboard(oid="d", title="D", widgets=[w],
+                           filters=[SourceFilter(FilterKind.MEMBER, "[c.Country]", "members", [], raw={"all": True})])
+    mcols = [{"name": "Gender", "properties": {"column_type": "ATTRIBUTE"}},
+             {"name": "Country", "properties": {"column_type": "ATTRIBUTE"}},
+             {"name": "Revenue", "properties": {"column_type": "MEASURE", "aggregation": "SUM"}}]
+    out = dashboard_to_tml(dash, "M", "fqn", mcols)
+    assert "[Gender] != 'Unspecified'" in out["answers"][0]["search_query"]   # widget filter -> search
+    assert [f["column"][0] for f in out["liveboard"]["liveboard"]["filters"]] == ["Country"]  # dash filter -> chip
+
+
 def test_combo_line_column_orders_column_series_first():
     # a line widget with one value carrying singleSeriesType 'column' is a bar+line combo ->
     # LINE_COLUMN, with the column-typed measure first in y (TS draws the first y as columns).
