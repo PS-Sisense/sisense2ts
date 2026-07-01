@@ -193,11 +193,22 @@ def test_liveboard_filters_presets_all_and_unmapped():
     assert by["Country"]["generic_filter"] == {"oper": "IN", "values": ["US", "UK"]}
     assert by["Gender"]["generic_filter"] == {"oper": "NOT_IN", "values": ["Unspecified"]}
     assert "generic_filter" not in by["Date"]        # all -> bare interactive chip
-    assert "generic_filter" not in by["Revenue"]     # range -> chip, preset not carried
+    assert by["Revenue"]["generic_filter"] == {"oper": "GT", "values": [0]}   # fromNotEqual:0 -> > 0
     assert "Nope" not in by                          # column not on the model -> no chip
     covs = {it.name: it.coverage for it in rep.items if it.object_type == "filter"}
     assert covs["Country"] is Coverage.AUTO and covs["Date"] is Coverage.AUTO
-    assert covs["Revenue"] is Coverage.PARTIAL and covs["Nope"] is Coverage.PARTIAL  # flagged, not silent
+    # measure-range preset is carried but flagged (per-viz aggregate, not rows); unmapped is flagged
+    assert covs["Revenue"] is Coverage.PARTIAL and covs["Nope"] is Coverage.PARTIAL
+
+
+def test_range_generic_filter_mapping():
+    from sisense2ts.map.content import _range_generic_filter
+    assert _range_generic_filter({"fromNotEqual": 0}) == {"oper": "GT", "values": [0]}
+    assert _range_generic_filter({"from": 10}) == {"oper": "GE", "values": [10]}
+    assert _range_generic_filter({"toNotEqual": 5}) == {"oper": "LT", "values": [5]}
+    assert _range_generic_filter({"from": 1, "to": 9}) == {"oper": "BW_INC", "values": [1, 9]}
+    assert _range_generic_filter({"equals": 7}) == {"oper": "EQ", "values": [7]}
+    assert _range_generic_filter({}) is None
 
 
 def test_dashboard_filters_become_liveboard_chips_widget_filters_stay():

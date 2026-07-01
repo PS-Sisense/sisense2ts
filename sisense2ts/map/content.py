@@ -333,12 +333,32 @@ def _filter_token(sf, attrs, measures):
     return "", ""
 
 
+def _range_generic_filter(raw: dict):
+    """Sisense numeric range dict -> a ThoughtSpot generic_filter {oper, values}, or None.
+    from/to are inclusive bounds (GE/LE); fromNotEqual/toNotEqual are exclusive (GT/LT);
+    a two-sided range becomes BETWEEN; `equals` becomes EQ."""
+    r = raw or {}
+    lo, lo_ex = r.get("from"), r.get("fromNotEqual")
+    hi, hi_ex = r.get("to"), r.get("toNotEqual")
+    if r.get("equals") is not None:
+        return {"oper": "EQ", "values": [r["equals"]]}
+    if lo is not None and hi is not None:
+        return {"oper": "BW_INC", "values": [lo, hi]}          # between, inclusive
+    if lo_ex is not None and hi_ex is not None:
+        return {"oper": "BW", "values": [lo_ex, hi_ex]}        # between, exclusive
+    for val, op in ((lo, "GE"), (lo_ex, "GT"), (hi, "LE"), (hi_ex, "LT")):
+        if val is not None:
+            return {"oper": op, "values": [val]}
+    return None
+
+
 def liveboard_filters(filters, attrs, measures, report=None):
     """Sisense DASHBOARD-level filters (the interactive filter bar) -> ThoughtSpot Liveboard
-    filter chips that apply across every viz. A member/exclude selection carries its preset
-    (generic_filter IN/NOT_IN); an 'all' / range / relative-date / unrecognized filter still
-    becomes an interactive chip on the column, with its source preset flagged as not-applied
-    (never silently dropped). Returns the list of liveboard-filter dicts."""
+    filter chips that apply across every viz. member/exclude -> generic_filter IN/NOT_IN;
+    numeric range -> generic_filter GE/GT/LE/LT/BETWEEN (a range on a MEASURE is flagged
+    REVIEW, since a liveboard filter on a measure restricts the per-viz aggregate, not rows
+    as in Sisense); an 'all'/relative-date/unrecognized filter still becomes an interactive
+    chip with its preset flagged as not-carried. Nothing is silently dropped."""
     out = []
     for sf in filters:
         col = _model_col(sf.dim)
@@ -356,9 +376,16 @@ def liveboard_filters(filters, attrs, measures, report=None):
         elif sf.kind is FilterKind.EXCLUDE and sf.values:
             chip["generic_filter"] = {"oper": "NOT_IN", "values": [str(v) for v in sf.values]}
             cov, note = Coverage.AUTO, "liveboard filter chip (exclude preset)"
+        elif sf.kind is FilterKind.RANGE and (gf := _range_generic_filter(sf.raw)):
+            chip["generic_filter"] = gf
+            if col in measures:   # a measure range filters the AGGREGATE per viz, not rows as in Sisense
+                cov, note = Coverage.PARTIAL, (f"liveboard filter chip ({gf['oper']} {gf['values']}); "
+                                              "on a measure it filters the per-viz aggregate, not rows")
+            else:
+                cov, note = Coverage.AUTO, f"liveboard filter chip (range {gf['oper']} {gf['values']})"
         elif (sf.raw or {}).get("all") or sf.kind is FilterKind.MEMBER:
             cov, note = Coverage.AUTO, "liveboard filter chip (all / interactive)"
-        else:   # range / relative-date / unrecognized preset -> chip present, preset not carried
+        else:   # relative-date / unrecognized preset -> chip present, preset not carried
             cov, note = Coverage.PARTIAL, "liveboard filter chip (interactive; source preset not carried)"
         out.append(chip)
         if report:
